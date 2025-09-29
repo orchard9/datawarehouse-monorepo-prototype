@@ -1,0 +1,92 @@
+# watch-now configuration for Orchard9 Data Warehouse Monorepo
+# Master configuration for monitoring all components
+
+services:
+  # Frontend service (Vite)
+  - name: frontend
+    type: rest
+    url: http://localhost:37950
+    health: /
+    timeout: 5s
+
+  # Backend API service (Express)
+  - name: backend-api
+    type: rest
+    url: http://localhost:37951
+    health: /health
+    timeout: 5s
+
+checks:
+  # Frontend quality checks
+  - name: frontend-lint
+    command: bash
+    args: ["-c", "cd frontend && npm run lint"]
+    timeout: 60s
+    description: "ESLint code quality check"
+
+  - name: frontend-typecheck
+    command: bash
+    args: ["-c", "cd frontend && npm run typecheck"]
+    timeout: 45s
+    description: "TypeScript type checking"
+
+  - name: frontend-build
+    command: bash
+    args: ["-c", "cd frontend && npm run build"]
+    timeout: 180s
+    description: "Production build validation"
+
+  - name: frontend-complexity
+    command: bash
+    args: ["-c", "cd frontend && npm run complexity"]
+    timeout: 30s
+    description: "Code complexity analysis"
+
+  - name: frontend-circular
+    command: bash
+    args: ["-c", "cd frontend && npm run circular"]
+    timeout: 30s
+    description: "Circular dependency detection"
+
+  - name: frontend-bundle-size
+    command: bash
+    args: ["-c", "cd frontend && npm run build --silent"]
+    timeout: 60s
+    description: "Bundle size analysis"
+
+  # Backend quality checks
+  - name: backend-typecheck
+    command: bash
+    args: ["-c", "cd backend && npx tsc --noEmit"]
+    timeout: 45s
+
+  - name: backend-build
+    command: bash
+    args: ["-c", "cd backend && npm run build"]
+    timeout: 60s
+
+  # Data warehouse ETL checks
+  - name: db-health
+    command: bash
+    args: ["-c", "cd datawarehouse-job && ./check_db_health.sh"]
+    timeout: 30s
+    description: "Database health check"
+
+  # Overall monorepo health
+  - name: dependency-audit
+    command: bash
+    args: ["-c", "cd frontend && npm audit --audit-level=moderate || true"]
+    timeout: 30s
+
+# Run checks every 2 minutes
+interval: 120s
+
+# Enable REST API for integration and dashboard
+api:
+  enabled: true
+  port: 9991  # Main monitoring port for monorepo
+
+# Notification thresholds (optional - for future integration)
+thresholds:
+  failure_count: 3  # Alert after 3 consecutive failures
+  response_time: 30s  # Alert if service takes > 30s to respond

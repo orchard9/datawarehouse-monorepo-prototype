@@ -1,0 +1,308 @@
+@import 'tailwindcss';
+
+/* Orchard9 Design System - Custom Properties */
+:root {
+  /* Design System Tokens */
+  --orchard-black: #000000;
+  --orchard-deep-blue: #0A1628;
+  --orchard-blue-gray: #1E293B;
+  --orchard-slate: #334155;
+  --orchard-gray: #64748B;
+  --orchard-light-gray: #94A3B8;
+  --orchard-off-white: #F8FAFC;
+  --orchard-pure-white: #FFFFFF;
+  --orchard-light-blue: #F0F4F8;
+  --orchard-blue-tint: #E2E8F0;
+  --orchard-cool-gray: #CBD5E1;
+  --orchard-dark-gray: #475569;
+  --orchard-charcoal: #334155;
+  --orchard-deep-slate: #1E293B;
+  --orchard-orange: #FB923C;
+  --orchard-orange-light: #FED7AA;
+  --orchard-orange-dark: #EA580C;
+
+  /* Status Colors */
+  --orchard-success: #10B981;
+  --orchard-success-bg: #ECFDF5;
+  --orchard-warning: #F59E0B;
+  --orchard-warning-bg: #FFFBEB;
+  --orchard-error: #EF4444;
+  --orchard-error-bg: #FEF2F2;
+  --orchard-info: #3B82F6;
+  --orchard-info-bg: #EFF6FF;
+
+  /* Typography */
+  --font-primary: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, 'Cascadia Code', monospace;
+
+  /* Spacing (8px grid) */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+
+  /* Animation */
+  --timing-fast: 150ms;
+  --timing-normal: 250ms;
+  --timing-slow: 350ms;
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Light theme semantic colors (default) */
+  --surface-primary: var(--orchard-pure-white);
+  --surface-secondary: var(--orchard-off-white);
+  --surface-tertiary: var(--orchard-light-blue);
+  --surface-elevated: var(--orchard-pure-white);
+  --surface-overlay: rgba(255, 255, 255, 0.95);
+
+  --content-primary: var(--orchard-black);
+  --content-secondary: var(--orchard-dark-gray);
+  --content-tertiary: var(--orchard-gray);
+  --content-disabled: var(--orchard-light-gray);
+  --content-inverse: var(--orchard-pure-white);
+
+  --border-subtle: var(--orchard-blue-tint);
+  --border-default: var(--orchard-cool-gray);
+  --border-strong: var(--orchard-slate);
+  --border-focus: var(--orchard-orange);
+
+  --interactive-default: var(--orchard-orange);
+  --interactive-hover: var(--orchard-orange-dark);
+  --interactive-active: var(--orchard-orange-light);
+  --interactive-disabled: var(--orchard-light-gray);
+
+  --semantic-success: #10B981;
+  --semantic-warning: #F59E0B;
+  --semantic-error: #EF4444;
+  --semantic-info: #3B82F6;
+
+  --semantic-success-bg: #ECFDF5;
+  --semantic-warning-bg: #FFFBEB;
+  --semantic-error-bg: #FEF2F2;
+  --semantic-info-bg: #EFF6FF;
+
+  /* Typography optimizations */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* Dark theme */
+[data-theme="dark"] {
+  --surface-primary: var(--orchard-black);
+  --surface-secondary: #050A0F;
+  --surface-tertiary: var(--orchard-blue-gray);
+  --surface-elevated: var(--orchard-deep-blue);
+  --surface-overlay: rgba(10, 22, 40, 0.95);
+
+  --content-primary: var(--orchard-off-white);
+  --content-secondary: var(--orchard-light-gray);
+  --content-tertiary: var(--orchard-gray);
+  --content-disabled: var(--orchard-slate);
+  --content-inverse: var(--orchard-black);
+
+  --border-subtle: var(--orchard-blue-gray);
+  --border-default: var(--orchard-slate);
+  --border-strong: var(--orchard-gray);
+  --border-focus: var(--orchard-orange);
+}
+
+/* System preference for dark mode */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --surface-primary: var(--orchard-black);
+    --surface-secondary: #050A0F;
+    --surface-tertiary: var(--orchard-blue-gray);
+    --surface-elevated: var(--orchard-deep-blue);
+    --surface-overlay: rgba(10, 22, 40, 0.95);
+
+    --content-primary: var(--orchard-off-white);
+    --content-secondary: var(--orchard-light-gray);
+    --content-tertiary: var(--orchard-gray);
+    --content-disabled: var(--orchard-slate);
+    --content-inverse: var(--orchard-black);
+
+    --border-subtle: var(--orchard-blue-gray);
+    --border-default: var(--orchard-slate);
+    --border-strong: var(--orchard-gray);
+    --border-focus: var(--orchard-orange);
+  }
+}
+
+/* Base styles following Orchard9 principles */
+html {
+  font-family: var(--font-primary);
+  line-height: 1.4;
+  color: var(--content-primary);
+  background-color: var(--surface-primary);
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1, 'ss01' 1;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--content-primary);
+  background-color: var(--surface-primary);
+  letter-spacing: -0.01em;
+}
+
+/* Focus management for accessibility */
+.focus-outline {
+  outline: 2px solid #FB923C;
+  outline-offset: 2px;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Component base styles */
+@layer components {
+  /* Button components following Orchard9 design */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+    background-color: var(--interactive-default);
+    color: var(--content-inverse);
+    border: 1px solid var(--interactive-default);
+    border-radius: 0;
+    transition: all 150ms ease;
+    cursor: pointer;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--interactive-hover);
+    border-color: var(--interactive-hover);
+  }
+
+  .btn-primary:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus), 0 0 0 4px rgba(251, 146, 60, 0.1);
+  }
+
+  .btn-primary:disabled {
+    background-color: var(--interactive-disabled);
+    border-color: var(--interactive-disabled);
+    color: var(--content-disabled);
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+    background-color: transparent;
+    color: var(--content-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 0;
+    transition: all 150ms ease;
+    cursor: pointer;
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--surface-tertiary);
+    border-color: var(--border-strong);
+  }
+
+  .btn-secondary:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus), 0 0 0 4px rgba(251, 146, 60, 0.1);
+  }
+
+  .btn-secondary:disabled {
+    background-color: transparent;
+    border-color: var(--interactive-disabled);
+    color: var(--content-disabled);
+    cursor: not-allowed;
+  }
+
+  /* Card components */
+  .card {
+    background-color: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    padding: 1rem;
+    transition: all 150ms ease;
+    border-radius: 2px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .card:hover {
+    border-color: var(--border-default);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--content-primary);
+    letter-spacing: -0.025em;
+  }
+
+  .card-content {
+    color: var(--content-secondary);
+    line-height: 1.5;
+  }
+
+  /* Status indicators */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 12px;
+  }
+
+  .status-active {
+    background-color: var(--semantic-success-bg);
+    color: var(--semantic-success);
+  }
+
+  .status-inactive {
+    background-color: var(--surface-tertiary);
+    color: var(--content-tertiary);
+  }
+
+  .status-warning {
+    background-color: var(--semantic-warning-bg);
+    color: var(--semantic-warning);
+  }
+
+  .status-error {
+    background-color: var(--semantic-error-bg);
+    color: var(--semantic-error);
+  }
+}

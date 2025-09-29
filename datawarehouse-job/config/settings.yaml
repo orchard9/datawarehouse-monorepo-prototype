@@ -1,0 +1,48 @@
+# Peach AI Data Warehouse Configuration
+# Production-ready settings with environment variable support
+
+version: "1.0"
+last_updated: "2025-08-01T16:40:00Z"
+
+# API Configuration
+api:
+  base_url: https://www.thepeach.ai/api/companion-agents/
+  timeout: 3000
+  retry_attempts: 3
+  bearer_token: "e11b0f26e64ae4f0ca63afd976037fa765288fd14190f7caa8e84899956f90e8"  # Set via environment variable: PEACHAI_API_TOKEN
+
+
+# Database Configuration  
+database:
+  path: "datawarehouse.db"
+  backup_enabled: true
+  backup_retention_days: 30
+
+# Google Sheets Export
+google_sheets:
+  credentials_path: "config/google_credentials.json"
+  default_title: "Campaign Performance Report"
+  
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/datawarehouse.log"
+  console: true
+  
+# ETL Pipeline Settings
+etl:
+  batch_size: 100
+  parallel_workers: 4
+  data_quality_threshold: 0.85
+  
+# Hierarchy Mapping
+hierarchy:
+  rules_file: "config/hierarchy_rules.yaml" 
+  cache_enabled: true
+  confidence_threshold: 0.7
+
+# Scheduling (Future Implementation)
+schedule:
+  enabled: false
+  daily_sync_time: "06:00"
+  timezone: "America/New_York"

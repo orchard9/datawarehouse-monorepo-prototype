@@ -1,0 +1,241 @@
+# Campaign Hierarchy Mapping Rules
+# Rules are processed in priority order (highest first)
+# Use 'inherit' to inherit from lower priority rules
+
+version: "1.0"
+last_updated: "2025-08-01T10:30:00Z"
+
+rules:
+  # Specific Overrides (Highest Priority)
+  - name: "Fred Test Campaign"
+    priority: 1000
+    pattern_type: "exact"
+    pattern_value: "fred"
+    mapping:
+      network: "Internal"
+      domain: "Test Campaigns"
+      placement: "Unknown"
+      targeting: "Unknown" 
+      special: "Personal"
+    active: true
+    notes: "Fred's personal test campaign"
+
+  - name: "John Marketing Test"
+    priority: 999
+    pattern_type: "exact"
+    pattern_value: "john"
+    mapping:
+      network: "Internal"
+      domain: "Marketing Tests"
+      placement: "Unknown"
+      targeting: "Unknown"
+      special: "Personal"
+    active: true
+
+  # Network Detection (High Priority)
+  - name: "Facebook Campaigns"
+    priority: 900
+    pattern_type: "contains"
+    pattern_value: "Facebook"
+    mapping:
+      network: "Facebook"
+      domain: "Social Media"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  - name: "Google Campaigns"
+    priority: 899
+    pattern_type: "contains"
+    pattern_value: "Google"
+    mapping:
+      network: "Google"
+      domain: "Search Engine"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  - name: "TikTok Campaigns"
+    priority: 898
+    pattern_type: "contains"
+    pattern_value: "TikTok"
+    mapping:
+      network: "TikTok"
+      domain: "Social Media"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  - name: "Instagram Campaigns"
+    priority: 897
+    pattern_type: "contains"
+    pattern_value: "Instagram"
+    mapping:
+      network: "Instagram"
+      domain: "Social Media"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  # Placement Detection (Medium-High Priority)
+  - name: "Desktop Placement"
+    priority: 800
+    pattern_type: "contains"
+    pattern_value: "Desktop"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "Desktop"
+      targeting: "Desktop Users"
+      special: "inherit"
+    active: true
+
+  - name: "Mobile Placement"
+    priority: 799
+    pattern_type: "regex"
+    pattern_value: ".*(Mobile|mobile|iOS|Android).*"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "Mobile"
+      targeting: "Mobile Users"
+      special: "inherit"
+    active: true
+
+  - name: "Tablet Placement"
+    priority: 798
+    pattern_type: "contains"
+    pattern_value: "Tablet"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "Tablet"
+      targeting: "Tablet Users"
+      special: "inherit"
+    active: true
+
+  # Special Campaign Types (Medium Priority)
+  - name: "Premium Campaigns"
+    priority: 700
+    pattern_type: "starts_with"
+    pattern_value: "Premium"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "Premium"
+    active: true
+
+  - name: "VIP Campaigns"
+    priority: 699
+    pattern_type: "contains"
+    pattern_value: "VIP"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "VIP"
+    active: true
+
+  - name: "Standard Campaigns"
+    priority: 698
+    pattern_type: "starts_with"
+    pattern_value: "Standard"
+    mapping:
+      network: "inherit"
+      domain: "inherit"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "Standard"
+    active: true
+
+  - name: "Dating Network Campaigns"
+    priority: 600
+    pattern_type: "contains"
+    pattern_value: "Dating"
+    mapping:
+      network: "inherit"
+      domain: "Dating Networks"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  - name: "Gaming Network Campaigns"
+    priority: 599
+    pattern_type: "contains"
+    pattern_value: "Gaming"
+    mapping:
+      network: "inherit"
+      domain: "Gaming Networks"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  - name: "Adult Network Campaigns"
+    priority: 598
+    pattern_type: "contains"
+    pattern_value: "Adult"
+    mapping:
+      network: "inherit"
+      domain: "Adult Networks"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "inherit"
+    active: true
+
+  # Pattern-Based Rules (Lower Priority)
+  - name: "Personal Name Campaigns"
+    priority: 500
+    pattern_type: "regex"
+    pattern_value: "^[A-Z][a-z]{2,15}$"
+    mapping:
+      network: "Internal"
+      domain: "Personal Campaigns"
+      placement: "Unknown"
+      targeting: "Unknown"
+      special: "Personal"
+    active: true
+    notes: "Catches single names like 'Fred', 'Sarah', etc."
+
+  - name: "Test Campaigns"
+    priority: 400
+    pattern_type: "contains"
+    pattern_value: "Test"
+    mapping:
+      network: "Internal"
+      domain: "Test Campaigns"
+      placement: "inherit"
+      targeting: "inherit"
+      special: "Test"
+    active: true
+
+  # Fallback (Lowest Priority)
+  - name: "Default Fallback"
+    priority: 1
+    pattern_type: "regex"
+    pattern_value: ".*"
+    mapping:
+      network: "Unknown"
+      domain: "Unknown Network"
+      placement: "Unknown"
+      targeting: "Unknown"
+      special: "Standard"
+    active: true
+    notes: "Catches all unmatched campaigns"
+
+# Configuration
+settings:
+  auto_backup: true
+  backup_count: 10
+  validation_on_load: true
+  case_sensitive: false
+  allow_partial_matches: true
+  inheritance_enabled: true
