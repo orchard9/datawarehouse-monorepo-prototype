@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(pip --version)",
+      "Bash(git --version)",
+      "Bash(powershell:*)",
+      "Bash(wmic:*)",
+      "Bash(fsutil volume diskfree:*)",
+      "Bash(dir C:)",
+      "Bash(findstr:*)",
+      "Read(//c/Users/Roland/Desktop/VCAIDWProject/datawarehouse-monorepo-prototype-main/**)",
+      "Bash(python:*)",
+      "Bash(venv\\Scripts\\activate:*)",
+      "Bash(pip install:*)",
+      "Bash(. venv/Scripts/activate)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

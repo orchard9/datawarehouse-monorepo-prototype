@@ -1,0 +1,53 @@
+# watch-now configuration for Orchard9 Data Warehouse ETL (Python)
+# Continuous quality monitoring for ETL pipeline
+
+checks:
+  # Complete system tests
+  - name: test-system
+    command: python
+    args: ["test_complete_system.py"]
+    timeout: 180s
+
+  # API client tests
+  - name: test-api-clients
+    command: python
+    args: ["test_api_clients.py"]
+    timeout: 120s
+
+  # ETL pipeline tests
+  - name: test-etl
+    command: python
+    args: ["test_etl_pipeline.py"]
+    timeout: 120s
+
+  # Database health check
+  - name: db-status
+    command: python
+    args: ["main.py", "status"]
+    timeout: 30s
+
+  # Code quality - Python linting (to be added)
+  - name: lint
+    command: make
+    args: ["lint"]
+    timeout: 60s
+
+  # Check requirements are installed
+  - name: dependency-check
+    command: python
+    args: ["-c", "import requests, pyyaml, pandas, sqlite3; print('Dependencies OK')"]
+    timeout: 10s
+
+  # Validate configuration file
+  - name: config-validation
+    command: python
+    args: ["-c", "import yaml; yaml.safe_load(open('config/settings.yaml')); print('Config valid')"]
+    timeout: 5s
+
+# Run checks every 90 seconds
+interval: 90s
+
+# Enable REST API for integration
+api:
+  enabled: true
+  port: 9092  # Data warehouse monitoring port

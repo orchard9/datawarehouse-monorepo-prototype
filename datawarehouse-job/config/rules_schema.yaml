@@ -1,0 +1,93 @@
+# YAML Schema for hierarchy_rules.yaml validation
+# This defines the structure and validation rules for the hierarchy rules file
+
+schema:
+  type: object
+  required: [version, rules, settings]
+  properties:
+    version:
+      type: string
+      pattern: "^\\d+\\.\\d+$"
+    
+    last_updated:
+      type: string
+      format: date-time
+    
+    rules:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [name, priority, pattern_type, pattern_value, mapping, active]
+        properties:
+          name:
+            type: string
+            minLength: 1
+            maxLength: 100
+          
+          priority:
+            type: integer
+            minimum: 1
+            maximum: 9999
+          
+          pattern_type:
+            type: string
+            enum: [contains, starts_with, ends_with, regex, exact]
+          
+          pattern_value:
+            type: string
+            minLength: 1
+          
+          mapping:
+            type: object
+            required: [network, domain, placement, targeting, special]
+            properties:
+              network:
+                type: string
+                minLength: 1
+              domain:
+                type: string
+                minLength: 1
+              placement:
+                type: string
+                minLength: 1
+              targeting:
+                type: string
+                minLength: 1
+              special:
+                type: string
+                minLength: 1
+          
+          active:
+            type: boolean
+          
+          notes:
+            type: string
+            maxLength: 500
+    
+    settings:
+      type: object
+      properties:
+        auto_backup:
+          type: boolean
+        backup_count:
+          type: integer
+          minimum: 1
+          maximum: 50
+        validation_on_load:
+          type: boolean
+        case_sensitive:
+          type: boolean
+        allow_partial_matches:
+          type: boolean
+        inheritance_enabled:
+          type: boolean
+
+# Validation Rules
+validation:
+  - rule: "Priority values must be unique"
+    type: "business_logic"
+  - rule: "Pattern values must be valid regex when pattern_type is 'regex'"
+    type: "pattern_validation"
+  - rule: "At least one fallback rule with low priority must exist"
+    type: "business_logic"

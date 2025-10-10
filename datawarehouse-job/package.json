@@ -1,0 +1,18 @@
+{
+  "name": "peach-ai-datawarehouse-poc",
+  "version": "1.0.0",
+  "description": "Production-ready data warehouse for Peach AI with ETL pipeline and Google Sheets export",
+  "scripts": {
+    "sync": "python main.py sync",
+    "export": "python main.py export --format csv",
+    "status": "python main.py status --detailed",
+    "test": "python test_complete_system.py && python test_api_clients.py",
+    "test:system": "python test_complete_system.py",
+    "test:clients": "python test_api_clients.py",
+    "db:init": "python src/database/schema.py",
+    "setup": "pip install -r requirements.txt && python src/database/schema.py"
+  },
+  "keywords": ["data-warehouse", "etl", "api", "sqlite", "fastapi"],
+  "author": "Claude Code",
+  "license": "MIT"
+}

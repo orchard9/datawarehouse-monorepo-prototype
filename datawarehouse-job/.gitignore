@@ -1,0 +1,103 @@
+# Peach AI Data Warehouse - Git Ignore Rules
+
+# Databases & Data Files
+*.db
+*.sqlite
+*.sqlite3
+datawarehouse.db
+debug_*.db
+
+# Credentials & Secrets  
+credentials.json
+*credentials*.json
+config/google_credentials.json
+.env
+.env.local
+
+# API Keys & Tokens (keep settings.yaml for bearer token reference)
+config/api_keys.json
+
+# Logs & Output Files
+*.log
+out.txt
+logs/
+debug_output.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Export & Output Files
+*.csv
+campaign_performance_*.csv
+export_*.xlsx
+export_*.csv
+
+# Node modules (for package.json)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Keep important config files
+!config/*.yaml
+!config/*.yml
+!requirements.txt
+!package.json

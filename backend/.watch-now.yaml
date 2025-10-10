@@ -1,0 +1,49 @@
+# watch-now configuration for Orchard9 Backend (Express + TypeScript)
+# Continuous quality monitoring for API server
+
+services:
+  - name: express-server
+    type: rest
+    url: http://localhost:3000
+    health: /health
+    timeout: 5s
+    # Only check when server is running
+
+checks:
+  # Build TypeScript
+  - name: build
+    command: npm
+    args: ["run", "build"]
+    timeout: 60s
+
+  # Linting (currently placeholder - needs ESLint setup)
+  - name: lint
+    command: npm
+    args: ["run", "lint"]
+    timeout: 30s
+
+  # Type checking
+  - name: typecheck
+    command: npx
+    args: ["tsc", "--noEmit"]
+    timeout: 45s
+
+  # Clean build artifacts
+  - name: clean-check
+    command: npm
+    args: ["run", "clean"]
+    timeout: 10s
+
+  # Verify dependencies
+  - name: dependency-check
+    command: npm
+    args: ["ls", "--depth=0"]
+    timeout: 10s
+
+# Run checks every 60 seconds
+interval: 60s
+
+# Enable REST API for integration
+api:
+  enabled: true
+  port: 9093  # Backend monitoring port
