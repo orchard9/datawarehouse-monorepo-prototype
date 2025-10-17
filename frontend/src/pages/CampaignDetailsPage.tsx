@@ -20,6 +20,10 @@ import {
   ZapOff,
   Zap,
   XCircle,
+  Edit3,
+  Save,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import {
   LineChart,
@@ -34,6 +38,8 @@ import {
   Cell,
 } from 'recharts';
 import { useCampaign, useCampaignMetrics, useCampaignActivity } from '@/hooks/useDataWarehouse';
+import { HierarchyEditModal } from '@/components/HierarchyEditModal';
+import { dataWarehouseApi } from '@/api/datawarehouse';
 
 interface TimeBreakdownFilters {
   timeRange: 'last24h' | 'last7d' | 'last30d' | 'custom';
@@ -101,6 +107,10 @@ const CampaignDetailsPage: React.FC = () => {
     endDate: searchParams.get('endDate') || undefined,
   }));
 
+  // Hierarchy edit modal state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedTierField, setSelectedTierField] = useState<string | null>(null);
+
   // Sync filters to URL
   useEffect(() => {
     const params = new URLSearchParams();
@@ -149,7 +159,7 @@ const CampaignDetailsPage: React.FC = () => {
   }, [filters]);
 
   // Fetch campaign and metrics data
-  const { campaign, loading: campaignLoading, error: campaignError } = useCampaign(campaignId);
+  const { campaign, loading: campaignLoading, error: campaignError, refetch: refetchCampaign } = useCampaign(campaignId);
   const { metrics, loading: metricsLoading } = useCampaignMetrics(campaignId, metricsQuery);
   const { activity, loading: activityLoading } = useCampaignActivity(campaignId);
 
@@ -257,6 +267,39 @@ const CampaignDetailsPage: React.FC = () => {
   ) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   }, []);
+
+  // Hierarchy edit handlers
+  const handleTierCardClick = useCallback((tierField: string) => {
+    setSelectedTierField(tierField);
+    setIsEditModalOpen(true);
+  }, []);
+
+  const handleModalClose = useCallback(() => {
+    setIsEditModalOpen(false);
+    setSelectedTierField(null);
+  }, []);
+
+  const handleSaveHierarchy = useCallback(async (data: {
+    network?: string;
+    domain?: string;
+    placement?: string;
+    targeting?: string;
+    special?: string;
+    override_reason?: string;
+    overridden_by: string;
+  }) => {
+    if (!campaignId) return;
+
+    try {
+      // Call API to save hierarchy override
+      await dataWarehouseApi.campaigns.updateHierarchyOverride(campaignId, data);
+
+      // Refresh campaign data to show updated hierarchy
+      await refetchCampaign();
+    } catch (error) {
+      throw error;
+    }
+  }, [campaignId, refetchCampaign]);
 
 
   // Loading and error states
@@ -598,11 +641,6 @@ const CampaignDetailsPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>Traffic Weight</label>
-            <p className="text-sm" style={{ color: 'var(--foreground)' }}>{campaign.traffic_weight}%</p>
-          </div>
-
-          <div>
             <label className="block text-sm font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>Created</label>
             <p className="text-sm" style={{ color: 'var(--foreground)' }}>{new Date(campaign.created_at).toLocaleDateString()}</p>
           </div>
@@ -619,6 +657,149 @@ const CampaignDetailsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Campaign Hierarchy */}
+      {campaign.hierarchy && (
+        <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold" style={{ color: 'var(--card-foreground)' }}>Campaign Hierarchy</h3>
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              <span>Confidence:</span>
+              <span className={`px-2 py-1 rounded font-medium ${
+                campaign.hierarchy.mapping_confidence >= 0.9 ? 'bg-green-100 text-green-800' :
+                campaign.hierarchy.mapping_confidence >= 0.7 ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {(campaign.hierarchy.mapping_confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Network */}
+            <button
+              onClick={() => handleTierCardClick('network')}
+              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+            >
+              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                1. Network
+              </label>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const getNetworkColor = (network: string): { bg: string; text: string } => {
+                    const colors: Record<string, { bg: string; text: string }> = {
+                      'Facebook': { bg: '#1877F2', text: '#ffffff' },
+                      'Instagram': { bg: '#E4405F', text: '#ffffff' },
+                      'Google': { bg: '#4285F4', text: '#ffffff' },
+                      'TikTok': { bg: '#000000', text: '#ffffff' },
+                      'LinkedIn': { bg: '#0A66C2', text: '#ffffff' },
+                      'Twitter': { bg: '#1DA1F2', text: '#ffffff' },
+                      'Pinterest': { bg: '#E60023', text: '#ffffff' },
+                      'Snapchat': { bg: '#FFFC00', text: '#000000' },
+                      'YouTube': { bg: '#FF0000', text: '#ffffff' },
+                      'Reddit': { bg: '#FF4500', text: '#ffffff' },
+                      'Unknown': { bg: '#6B7280', text: '#ffffff' },
+                    };
+                    return colors[network] || colors['Unknown'];
+                  };
+                  const { bg, text } = getNetworkColor(campaign.hierarchy!.network);
+                  return (
+                    <span
+                      className="px-3 py-1.5 text-sm font-medium rounded"
+                      style={{ backgroundColor: bg, color: text }}
+                    >
+                      {campaign.hierarchy!.network}
+                    </span>
+                  );
+                })()}
+                <Edit3 className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--muted-foreground)' }} />
+              </div>
+              <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                Advertising platform or vendor
+              </p>
+            </button>
+
+            {/* Domain */}
+            <button
+              onClick={() => handleTierCardClick('domain')}
+              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+            >
+              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                2. Domain
+              </label>
+              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                {campaign.hierarchy.domain}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Campaign category or type
+              </p>
+            </button>
+
+            {/* Placement */}
+            <button
+              onClick={() => handleTierCardClick('placement')}
+              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+            >
+              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                3. Placement
+              </label>
+              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                {campaign.hierarchy.placement}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Ad placement format
+              </p>
+            </button>
+
+            {/* Targeting */}
+            <button
+              onClick={() => handleTierCardClick('targeting')}
+              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+            >
+              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                4. Targeting
+              </label>
+              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                {campaign.hierarchy.targeting}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Target audience segment
+              </p>
+            </button>
+
+            {/* Special */}
+            <button
+              onClick={() => handleTierCardClick('special')}
+              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+            >
+              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                5. Special
+              </label>
+              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                {campaign.hierarchy.special}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Special classification
+              </p>
+            </button>
+          </div>
+
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              <span>
+                Last updated: {new Date(campaign.hierarchy.updated_at).toLocaleString()}
+              </span>
+              <span>
+                Campaign ID: {campaign.hierarchy.campaign_id}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Activity Log */}
       <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
@@ -663,6 +844,23 @@ const CampaignDetailsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Hierarchy Edit Modal */}
+      {campaign?.hierarchy && (
+        <HierarchyEditModal
+          isOpen={isEditModalOpen}
+          onClose={handleModalClose}
+          campaignId={campaignId}
+          currentHierarchy={{
+            network: campaign.hierarchy.network,
+            domain: campaign.hierarchy.domain,
+            placement: campaign.hierarchy.placement,
+            targeting: campaign.hierarchy.targeting,
+            special: campaign.hierarchy.special,
+          }}
+          onSave={handleSaveHierarchy}
+        />
+      )}
     </div>
   );
 };

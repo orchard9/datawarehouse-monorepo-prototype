@@ -65,6 +65,24 @@ interface DateRangeOption {
   label: string;
 }
 
+// Helper function to get network badge colors
+const getNetworkColor = (network: string): { bg: string; text: string } => {
+  const colors: Record<string, { bg: string; text: string }> = {
+    'Facebook': { bg: '#1877F2', text: '#ffffff' },
+    'Instagram': { bg: '#E4405F', text: '#ffffff' },
+    'Google': { bg: '#4285F4', text: '#ffffff' },
+    'TikTok': { bg: '#000000', text: '#ffffff' },
+    'LinkedIn': { bg: '#0A66C2', text: '#ffffff' },
+    'Twitter': { bg: '#1DA1F2', text: '#ffffff' },
+    'Pinterest': { bg: '#E60023', text: '#ffffff' },
+    'Snapchat': { bg: '#FFFC00', text: '#000000' },
+    'YouTube': { bg: '#FF0000', text: '#ffffff' },
+    'Reddit': { bg: '#FF4500', text: '#ffffff' },
+    'Unknown': { bg: '#6B7280', text: '#ffffff' },
+  };
+  return colors[network] || colors['Unknown'];
+};
+
 const MarketingDashboard: React.FC = () => {
   const navigate = useNavigate();
 
@@ -121,6 +139,9 @@ const MarketingDashboard: React.FC = () => {
     }
     if (filters.startDate) params.append('startDate', filters.startDate);
     if (filters.endDate) params.append('endDate', filters.endDate);
+    if (filters.vendors.length > 0) {
+      filters.vendors.forEach(network => params.append('network', network));
+    }
 
     // Trigger download
     const url = `http://localhost:37951/api/datawarehouse/export/csv?${params.toString()}`;
@@ -209,6 +230,16 @@ const MarketingDashboard: React.FC = () => {
   // Fetch campaigns with reactive query - will refetch when query changes!
   const { campaigns, meta, loading, error } = useCampaigns(query);
 
+  // Extract unique networks from campaigns for filter dropdown
+  const availableNetworks = useMemo(() => {
+    const networks = new Set<string>();
+    campaigns.forEach(campaign => {
+      if (campaign.hierarchy?.network) {
+        networks.add(campaign.hierarchy.network);
+      }
+    });
+    return Array.from(networks).sort();
+  }, [campaigns]);
 
   // Calculate aggregated metrics from campaigns
   const aggregatedMetrics = useMemo<AggregatedMetrics>(() => {
@@ -256,17 +287,27 @@ const MarketingDashboard: React.FC = () => {
     };
   }, [campaigns]);
 
-  // Apply client-side sorting for calculated columns
-  const sortedCampaigns = useMemo(() => {
+  // Apply client-side filtering and sorting
+  const filteredAndSortedCampaigns = useMemo(() => {
+    // First, apply network filtering (client-side)
+    let filtered = campaigns;
+    if (filters.vendors.length > 0) {
+      filtered = campaigns.filter(campaign => {
+        const network = campaign.hierarchy?.network || 'Unknown';
+        return filters.vendors.includes(network);
+      });
+    }
+
+    // Then apply client-side sorting for calculated columns
     const clientSideColumns = ['cost', 'raw_clicks', 'unique_clicks', 'cpc_raw', 'cpc_unique',
                                 'raw_reg', 'cpr_raw', 'cpr_confirm', 'cps', 'revenue', 'rps', 'ltrev', 'roas'];
 
     if (!clientSideColumns.includes(filters.sortBy)) {
-      return campaigns; // Backend handles sorting
+      return filtered; // Backend handles sorting
     }
 
     // Client-side sorting for calculated fields
-    return [...campaigns].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       let aValue = 0;
       let bValue = 0;
 
@@ -308,17 +349,17 @@ const MarketingDashboard: React.FC = () => {
 
       return filters.sortDir === 'asc' ? aValue - bValue : bValue - aValue;
     });
-  }, [campaigns, filters.sortBy, filters.sortDir]);
+  }, [campaigns, filters.sortBy, filters.sortDir, filters.vendors]);
 
   // Prepare chart data from campaigns
   const chartData = useMemo<ChartData[]>(() => {
-    return sortedCampaigns.slice(0, 5).map(campaign => ({
+    return filteredAndSortedCampaigns.slice(0, 5).map(campaign => ({
       name: campaign.name.substring(0, 15),
       cost: (campaign.metrics?.totalSessions || 0) * 0.75,
       revenue: (campaign.metrics?.totalConvertedUsers || 0) * 25.50,
       roas: ((campaign.metrics?.totalConvertedUsers || 0) * 25.50) / ((campaign.metrics?.totalSessions || 0) * 0.75 || 1),
     }));
-  }, [sortedCampaigns]);
+  }, [filteredAndSortedCampaigns]);
 
   // Sort handler - backend only supports: name, created_at, updated_at, sync_timestamp, traffic_weight, sessions, registrations
   const handleSort = useCallback((column: string) => {
@@ -725,29 +766,41 @@ const MarketingDashboard: React.FC = () => {
             </>
           )}
 
-          {/* Vendor Filter (Dropdown) */}
+          {/* Network Filter (Dropdown) */}
           <div className="relative">
-            <label className="block text-sm font-medium mb-1 text-gray-900">Vendors</label>
+            <label className="block text-sm font-medium mb-1 text-gray-900">Networks</label>
             <button
               onClick={() => setShowVendorDropdown(!showVendorDropdown)}
               className="w-full px-4 py-2 rounded-lg flex items-center space-x-2 bg-white text-gray-900 border border-gray-300 hover:bg-gray-50 transition-colors"
             >
-              <span className="flex-1 text-left">{filters.vendors.length > 0 ? `${filters.vendors.length} selected` : 'All vendors'}</span>
+              <span className="flex-1 text-left">{filters.vendors.length > 0 ? `${filters.vendors.length} selected` : 'All networks'}</span>
               <ChevronDown className="h-4 w-4" />
             </button>
             {showVendorDropdown && (
-              <div className="absolute top-full mt-1 right-0 rounded-lg shadow-lg z-50 min-w-[200px] bg-white border border-gray-300">
-                {['Facebook', 'Google', 'Twitter', 'LinkedIn'].map(vendor => (
-                  <label key={vendor} className="flex items-center px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={filters.vendors.includes(vendor)}
-                      onChange={() => toggleVendor(vendor)}
-                      className="mr-2 w-4 h-4"
-                    />
-                    <span className="text-sm text-gray-900">{vendor}</span>
-                  </label>
-                ))}
+              <div className="absolute top-full mt-1 right-0 rounded-lg shadow-lg z-50 min-w-[240px] max-h-80 overflow-y-auto bg-white border border-gray-300">
+                {availableNetworks.length > 0 ? (
+                  availableNetworks.map(network => {
+                    const { bg, text } = getNetworkColor(network);
+                    return (
+                      <label key={network} className="flex items-center px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={filters.vendors.includes(network)}
+                          onChange={() => toggleVendor(network)}
+                          className="mr-3 w-4 h-4"
+                        />
+                        <span
+                          className="px-2 py-1 text-xs font-medium rounded"
+                          style={{ backgroundColor: bg, color: text }}
+                        >
+                          {network}
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div className="px-4 py-2 text-sm text-gray-500">No networks available</div>
+                )}
               </div>
             )}
           </div>
@@ -931,6 +984,9 @@ const MarketingDashboard: React.FC = () => {
                   </button>
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  <span>NETWORK</span>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
                   <button
                     onClick={() => handleSort('raw_clicks')}
                     className="flex items-center space-x-1 hover:opacity-80"
@@ -1106,9 +1162,6 @@ const MarketingDashboard: React.FC = () => {
                     )}
                   </button>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                  ACTIONS
-                </th>
               </tr>
             </thead>
             <tbody className="divide-y" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
@@ -1124,14 +1177,14 @@ const MarketingDashboard: React.FC = () => {
                     Error loading campaigns: {error.message}
                   </td>
                 </tr>
-              ) : sortedCampaigns.length === 0 ? (
+              ) : filteredAndSortedCampaigns.length === 0 ? (
                 <tr>
                   <td colSpan={19} className="px-6 py-4 text-center" style={{ color: 'var(--muted-foreground)' }}>
                     No campaigns found
                   </td>
                 </tr>
               ) : (
-                sortedCampaigns.map((campaign) => {
+                filteredAndSortedCampaigns.map((campaign) => {
                   const cost = (campaign.metrics?.totalSessions || 0) * 0.75;
                   const totalConvertedUsers = campaign.metrics?.totalConvertedUsers || 0;
                   const revenue = totalConvertedUsers * 25.50;
@@ -1160,6 +1213,20 @@ const MarketingDashboard: React.FC = () => {
                         }`}>
                           {campaign.is_serving ? 'Live' : 'Paused'}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {(() => {
+                          const network = campaign.hierarchy?.network || 'Unknown';
+                          const { bg, text } = getNetworkColor(network);
+                          return (
+                            <span
+                              className="px-2 py-1 text-xs font-medium rounded"
+                              style={{ backgroundColor: bg, color: text }}
+                            >
+                              {network}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
                         —
@@ -1208,28 +1275,6 @@ const MarketingDashboard: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         {roas.toFixed(2)}x
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // TODO: Add edit functionality
-                          }}
-                          className="mr-3 hover:opacity-80"
-                          style={{ color: 'var(--interactive-default)' }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // TODO: Add delete functionality
-                          }}
-                          className="hover:opacity-80"
-                          style={{ color: 'var(--semantic-error)' }}
-                        >
-                          Delete
-                        </button>
                       </td>
                     </tr>
                   );

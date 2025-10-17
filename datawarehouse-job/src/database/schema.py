@@ -106,7 +106,28 @@ class DatabaseSchema:
                 UNIQUE(rule_name)
             )
         """)
-        
+
+        # Campaign hierarchy overrides table - manual corrections that persist across syncs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_hierarchy_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                network TEXT,
+                domain TEXT,
+                placement TEXT,
+                targeting TEXT,
+                special TEXT,
+                override_reason TEXT,
+                overridden_by TEXT NOT NULL,
+                overridden_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns (id),
+                UNIQUE(campaign_id, is_active) ON CONFLICT REPLACE
+            )
+        """)
+
         # Sync history table - track ETL runs and data lineage
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_history (
@@ -145,6 +166,7 @@ class DatabaseSchema:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_campaigns_is_serving ON campaigns (is_serving)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_campaign ON campaign_hierarchy (campaign_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_network ON campaign_hierarchy (network)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_overrides_campaign ON campaign_hierarchy_overrides (campaign_id, is_active)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_rules_priority ON hierarchy_rules (priority DESC, is_active)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_type_time ON sync_history (sync_type, start_time)")
         

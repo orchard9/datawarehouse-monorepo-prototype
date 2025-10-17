@@ -207,7 +207,115 @@ class DatabaseOperations:
         
         self.conn.commit()
         return cursor.lastrowid
-    
+
+    # Hierarchy override operations
+    def upsert_hierarchy_override(self, override_data: Dict[str, Any]) -> int:
+        """Insert or update hierarchy override for a campaign"""
+        cursor = self.conn.cursor()
+
+        # Deactivate any existing active overrides for this campaign
+        cursor.execute("""
+            UPDATE campaign_hierarchy_overrides
+            SET is_active = 0, updated_at = ?
+            WHERE campaign_id = ? AND is_active = 1
+        """, (datetime.now(timezone.utc).isoformat(), override_data['campaign_id']))
+
+        # Insert new override
+        cursor.execute("""
+            INSERT INTO campaign_hierarchy_overrides
+            (campaign_id, network, domain, placement, targeting, special,
+             override_reason, overridden_by, overridden_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (
+            override_data['campaign_id'],
+            override_data.get('network'),
+            override_data.get('domain'),
+            override_data.get('placement'),
+            override_data.get('targeting'),
+            override_data.get('special'),
+            override_data.get('override_reason', 'Manual correction'),
+            override_data['overridden_by'],
+            datetime.now(timezone.utc).isoformat()
+        ))
+
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_hierarchy_override(self, campaign_id: int) -> Optional[Dict[str, Any]]:
+        """Get active hierarchy override for a campaign"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM campaign_hierarchy_overrides
+            WHERE campaign_id = ? AND is_active = 1
+            ORDER BY overridden_at DESC
+            LIMIT 1
+        """, (campaign_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_all_active_overrides(self) -> List[Dict[str, Any]]:
+        """Get all active hierarchy overrides"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM campaign_hierarchy_overrides
+            WHERE is_active = 1
+            ORDER BY campaign_id
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def delete_hierarchy_override(self, campaign_id: int, overridden_by: str) -> bool:
+        """Deactivate (soft delete) hierarchy override for a campaign"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE campaign_hierarchy_overrides
+            SET is_active = 0, updated_at = ?
+            WHERE campaign_id = ? AND is_active = 1
+        """, (datetime.now(timezone.utc).isoformat(), campaign_id))
+
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_hierarchy_override_history(self, campaign_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get override history for a campaign"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM campaign_hierarchy_overrides
+            WHERE campaign_id = ?
+            ORDER BY overridden_at DESC
+            LIMIT ?
+        """, (campaign_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_merged_hierarchy(self, campaign_id: int) -> Optional[Dict[str, Any]]:
+        """Get hierarchy with override merged (override takes precedence)"""
+        cursor = self.conn.cursor()
+
+        # Get base hierarchy
+        cursor.execute("SELECT * FROM campaign_hierarchy WHERE campaign_id = ?", (campaign_id,))
+        base = cursor.fetchone()
+        if not base:
+            return None
+
+        base_dict = dict(base)
+
+        # Get active override
+        override = self.get_hierarchy_override(campaign_id)
+        if override:
+            # Merge override values (only non-null values)
+            for field in ['network', 'domain', 'placement', 'targeting', 'special']:
+                if override.get(field):
+                    base_dict[field] = override[field]
+
+            # Add override metadata
+            base_dict['has_override'] = True
+            base_dict['override_reason'] = override.get('override_reason')
+            base_dict['overridden_by'] = override.get('overridden_by')
+            base_dict['overridden_at'] = override.get('overridden_at')
+        else:
+            base_dict['has_override'] = False
+
+        return base_dict
+
     # Sync history operations
     def start_sync(self, sync_type: str) -> int:
         """Start a new sync operation"""

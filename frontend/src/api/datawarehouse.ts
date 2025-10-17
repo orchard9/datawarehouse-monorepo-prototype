@@ -121,6 +121,37 @@ export const campaignApi = {
       }>;
     }>(`${BASE_PATH}/campaigns/${id}/activity`, { limit });
   },
+
+  /**
+   * Update campaign hierarchy override
+   */
+  async updateHierarchyOverride(
+    id: number,
+    data: {
+      network?: string;
+      domain?: string;
+      placement?: string;
+      targeting?: string;
+      special?: string;
+      override_reason?: string;
+      overridden_by: string;
+    }
+  ) {
+    return api.patch<{
+      success: boolean;
+      hierarchy: {
+        network: string;
+        domain: string;
+        placement: string;
+        targeting: string;
+        special: string;
+        has_override: boolean;
+        override_reason?: string;
+        overridden_by?: string;
+        overridden_at?: string;
+      };
+    }>(`${BASE_PATH}/campaigns/${id}/hierarchy`, data);
+  },
 };
 
 /**

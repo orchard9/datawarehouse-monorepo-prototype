@@ -544,6 +544,7 @@ export class DataWarehouseCampaignService {
 
   /**
    * Get campaign hierarchy with organization, program, ad sets, and ads
+   * Returns merged hierarchy (auto-mapping + active overrides)
    */
   static async getCampaignHierarchy(campaignId: number): Promise<CampaignHierarchyResponse> {
     const db = getDataWarehouseDatabase();
@@ -552,13 +553,27 @@ export class DataWarehouseCampaignService {
       // Get the campaign first to ensure it exists
       const campaign = await DataWarehouseCampaignService.getCampaignById(campaignId);
 
-      // Get campaign hierarchy mapping
-      const hierarchySql = `
-        SELECT * FROM campaign_hierarchy
-        WHERE campaign_id = ?
-        LIMIT 1
-      `;
-      const hierarchy = db.executeQuerySingle<CampaignHierarchy>(hierarchySql, [campaignId]);
+      // Get merged hierarchy (includes overrides if any) using Python call
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      const pythonScript = `
+import sys
+import json
+sys.path.insert(0, '${process.cwd()}/../datawarehouse-job/src')
+from database.operations import DatabaseOperations
+from database.schema import initialize_database
+
+conn = initialize_database('${process.cwd()}/../datawarehouse-job/datawarehouse.db')
+db_ops = DatabaseOperations(conn)
+merged = db_ops.get_merged_hierarchy(${campaignId})
+print(json.dumps(merged) if merged else 'null')
+conn.close()
+`;
+
+      const { stdout } = await execAsync(`python3 -c "${pythonScript.replace(/\n/g, '; ')}"`);
+      const hierarchy = stdout.trim() === 'null' ? null : JSON.parse(stdout.trim());
 
       // For now, since we don't have the full organization/program structure in the database,
       // we'll return null for organization and program
@@ -577,6 +592,7 @@ export class DataWarehouseCampaignService {
       logger.info('Campaign hierarchy retrieved successfully', {
         campaignId,
         hasHierarchy: hierarchy !== null,
+        hasOverride: hierarchy?.has_override || false,
         adSetsCount: adSets.length,
         adsCount: ads.length
       });
@@ -1822,6 +1838,222 @@ export class DataWarehouseSyncService {
           uptime: process.uptime()
         }
       };
+    }
+  }
+}
+
+/**
+ * Hierarchy Override operations
+ * Allows manual corrections to auto-generated hierarchy mappings
+ */
+export class DataWarehouseHierarchyOverrideService {
+  /**
+   * Update campaign hierarchy with manual override
+   */
+  static async updateHierarchyOverride(
+    campaignId: number,
+    overrideData: {
+      network?: string;
+      domain?: string;
+      placement?: string;
+      targeting?: string;
+      special?: string;
+      override_reason?: string;
+      overridden_by: string;
+    }
+  ): Promise<{ success: boolean; hierarchy: CampaignHierarchy }> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(overrideData.overridden_by, 'overridden_by is required');
+
+      // Verify campaign exists
+      const campaign = await DataWarehouseCampaignService.getCampaignById(campaignId);
+
+      // Deactivate existing override if any
+      const deactivateSql = `
+        UPDATE campaign_hierarchy_overrides
+        SET is_active = 0
+        WHERE campaign_id = ? AND is_active = 1
+      `;
+      db.executeQuery(deactivateSql, [campaignId]);
+
+      // Insert new override
+      const insertSql = `
+        INSERT INTO campaign_hierarchy_overrides (
+          campaign_id, network, domain, placement, targeting, special,
+          override_reason, overridden_by, overridden_at, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)
+      `;
+
+      db.executeQuery(insertSql, [
+        campaignId,
+        overrideData.network || null,
+        overrideData.domain || null,
+        overrideData.placement || null,
+        overrideData.targeting || null,
+        overrideData.special || null,
+        overrideData.override_reason || null,
+        overrideData.overridden_by
+      ]);
+
+      // Get merged hierarchy (base + override)
+      const mergedSql = `
+        SELECT
+          ch.id,
+          ch.campaign_id,
+          ch.campaign_name,
+          COALESCE(cho.network, ch.network) as network,
+          COALESCE(cho.domain, ch.domain) as domain,
+          COALESCE(cho.placement, ch.placement) as placement,
+          COALESCE(cho.targeting, ch.targeting) as targeting,
+          COALESCE(cho.special, ch.special) as special,
+          ch.mapping_confidence,
+          ch.created_at,
+          ch.updated_at,
+          CASE WHEN cho.id IS NOT NULL THEN 1 ELSE 0 END as has_override,
+          cho.override_reason,
+          cho.overridden_by,
+          cho.overridden_at
+        FROM campaign_hierarchy ch
+        LEFT JOIN campaign_hierarchy_overrides cho ON ch.campaign_id = cho.campaign_id AND cho.is_active = 1
+        WHERE ch.campaign_id = ?
+      `;
+
+      const mergedResult = db.executeQuerySingle<any>(mergedSql, [campaignId]);
+
+      if (!mergedResult) {
+        throw new NotFoundError('Campaign hierarchy not found after override');
+      }
+
+      const mergedHierarchy: CampaignHierarchy = {
+        id: mergedResult.id,
+        campaign_id: mergedResult.campaign_id,
+        campaign_name: mergedResult.campaign_name,
+        network: mergedResult.network,
+        domain: mergedResult.domain,
+        placement: mergedResult.placement,
+        targeting: mergedResult.targeting,
+        special: mergedResult.special,
+        mapping_confidence: mergedResult.mapping_confidence,
+        created_at: mergedResult.created_at,
+        updated_at: mergedResult.updated_at
+      };
+
+      logger.info('Updated hierarchy override', {
+        campaignId,
+        overriddenBy: overrideData.overridden_by,
+        fields: Object.keys(overrideData).filter(k => k !== 'overridden_by' && overrideData[k as keyof typeof overrideData])
+      });
+
+      return {
+        success: true,
+        hierarchy: mergedHierarchy
+      };
+
+    } catch (error) {
+      logger.error('Failed to update hierarchy override', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'updateHierarchyOverride');
+      throw error;
+    }
+  }
+
+  /**
+   * Delete (deactivate) hierarchy override
+   */
+  static async deleteHierarchyOverride(campaignId: number, overridden_by: string): Promise<{ success: boolean }> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+
+      // Call Python to delete override
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      const pythonScript = `
+import sys
+sys.path.insert(0, '${process.cwd()}/../datawarehouse-job/src')
+from database.operations import DatabaseOperations
+from database.schema import initialize_database
+
+conn = initialize_database('${process.cwd()}/../datawarehouse-job/datawarehouse.db')
+db_ops = DatabaseOperations(conn)
+success = db_ops.delete_hierarchy_override(${campaignId}, '${overridden_by}')
+print('true' if success else 'false')
+conn.close()
+`;
+
+      const { stdout } = await execAsync(`python3 -c "${pythonScript.replace(/\n/g, '; ')}"`);
+      const success = stdout.trim() === 'true';
+
+      logger.info('Deleted hierarchy override', {
+        campaignId,
+        success
+      });
+
+      return { success };
+
+    } catch (error) {
+      logger.error('Failed to delete hierarchy override', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'deleteHierarchyOverride');
+      throw error;
+    }
+  }
+
+  /**
+   * Get hierarchy override history for a campaign
+   */
+  static async getHierarchyOverrideHistory(campaignId: number, limit: number = 10): Promise<any[]> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+
+      // Call Python to get history
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      const pythonScript = `
+import sys
+import json
+sys.path.insert(0, '${process.cwd()}/../datawarehouse-job/src')
+from database.operations import DatabaseOperations
+from database.schema import initialize_database
+
+conn = initialize_database('${process.cwd()}/../datawarehouse-job/datawarehouse.db')
+db_ops = DatabaseOperations(conn)
+history = db_ops.get_hierarchy_override_history(${campaignId}, ${limit})
+print(json.dumps(history))
+conn.close()
+`;
+
+      const { stdout } = await execAsync(`python3 -c "${pythonScript.replace(/\n/g, '; ')}"`);
+      const history = JSON.parse(stdout.trim());
+
+      logger.info('Retrieved hierarchy override history', {
+        campaignId,
+        historyCount: history.length
+      });
+
+      return history;
+
+    } catch (error) {
+      logger.error('Failed to get hierarchy override history', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'getHierarchyOverrideHistory');
+      throw error;
     }
   }
 }

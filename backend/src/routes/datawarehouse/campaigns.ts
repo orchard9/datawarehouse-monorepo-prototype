@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { ErrorUtils } from '../../utils/errors.js';
-import { DataWarehouseCampaignService } from '../../services/dataWarehouseService.js';
+import { DataWarehouseCampaignService, DataWarehouseHierarchyOverrideService } from '../../services/dataWarehouseService.js';
 import { DataWarehouseCampaignQuery, DataWarehouseMetricsQuery, CampaignActivityQuery } from '../../types/index.js';
 import logger from '../../utils/logger.js';
 
@@ -53,6 +53,25 @@ const ActivityQuerySchema = z.object({
   source: z.enum(['system', 'user', 'api', 'etl']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional()
+});
+
+const HierarchyOverrideSchema = z.object({
+  network: z.string().min(1).max(255).optional(),
+  domain: z.string().min(1).max(255).optional(),
+  placement: z.string().min(1).max(255).optional(),
+  targeting: z.string().min(1).max(255).optional(),
+  special: z.string().min(1).max(255).optional(),
+  override_reason: z.string().min(1).max(500).optional(),
+  overridden_by: z.string().min(1).max(255)
+}).refine(
+  (data) => data.network || data.domain || data.placement || data.targeting || data.special,
+  {
+    message: "At least one hierarchy field (network, domain, placement, targeting, special) must be provided"
+  }
+);
+
+const HierarchyHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional()
 });
 
 // Validation middleware
@@ -119,6 +138,52 @@ const validateCampaignId = (req: Request, res: Response, next: Function): void =
 const validateActivityQuery = (req: Request, res: Response, next: Function): void => {
   try {
     const validatedQuery = ActivityQuerySchema.parse(req.query);
+    (req as any).validatedQuery = validatedQuery;
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message,
+        value: (err as any).input ?? 'unknown'
+      }));
+
+      res.error('Validation failed', 400, {
+        code: 'VALIDATION_ERROR',
+        errors: validationErrors
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
+const validateHierarchyOverride = (req: Request, res: Response, next: Function): void => {
+  try {
+    const validatedBody = HierarchyOverrideSchema.parse(req.body);
+    (req as any).validatedBody = validatedBody;
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message,
+        value: (err as any).input ?? 'unknown'
+      }));
+
+      res.error('Validation failed', 400, {
+        code: 'VALIDATION_ERROR',
+        errors: validationErrors
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
+const validateHierarchyHistoryQuery = (req: Request, res: Response, next: Function): void => {
+  try {
+    const validatedQuery = HierarchyHistoryQuerySchema.parse(req.query);
     (req as any).validatedQuery = validatedQuery;
     next();
   } catch (error) {
@@ -245,6 +310,67 @@ router.get('/:id/activity', validateCampaignId, validateActivityQuery, ErrorUtil
   } else {
     res.error('Failed to retrieve campaign activity', 500, 'SERVICE_ERROR');
   }
+}));
+
+/**
+ * PATCH /api/datawarehouse/campaigns/:id/hierarchy
+ * Update campaign hierarchy with manual override
+ */
+router.patch('/:id/hierarchy', validateCampaignId, validateHierarchyOverride, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const overrideData = (req as any).validatedBody;
+
+  logger.info('Updating campaign hierarchy override', {
+    campaignId,
+    overrideData,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseHierarchyOverrideService.updateHierarchyOverride(campaignId, overrideData);
+
+  res.success(result, 'Campaign hierarchy override updated successfully');
+}));
+
+/**
+ * DELETE /api/datawarehouse/campaigns/:id/hierarchy/override
+ * Delete (deactivate) campaign hierarchy override
+ */
+router.delete('/:id/hierarchy/override', validateCampaignId, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const overridden_by = req.body.overridden_by || 'system';
+
+  logger.info('Deleting campaign hierarchy override', {
+    campaignId,
+    overridden_by,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseHierarchyOverrideService.deleteHierarchyOverride(campaignId, overridden_by);
+
+  res.success(result, 'Campaign hierarchy override deleted successfully');
+}));
+
+/**
+ * GET /api/datawarehouse/campaigns/:id/hierarchy/history
+ * Get campaign hierarchy override history
+ */
+router.get('/:id/hierarchy/history', validateCampaignId, validateHierarchyHistoryQuery, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const query = (req as any).validatedQuery;
+  const limit = query?.limit || 10;
+
+  logger.info('Fetching campaign hierarchy override history', {
+    campaignId,
+    limit,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseHierarchyOverrideService.getHierarchyOverrideHistory(campaignId, limit);
+
+  res.success(result, 'Campaign hierarchy override history retrieved successfully');
 }));
 
 export default router;
