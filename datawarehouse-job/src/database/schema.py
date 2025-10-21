@@ -41,27 +41,40 @@ class DatabaseSchema:
             CREATE TABLE IF NOT EXISTS hourly_data (
                 campaign_id INTEGER NOT NULL,
                 unix_hour INTEGER NOT NULL,
-                
+
                 -- Registration data
                 credit_cards INTEGER DEFAULT 0,
                 email_accounts INTEGER DEFAULT 0,
                 google_accounts INTEGER DEFAULT 0,
+                facebook_accounts INTEGER DEFAULT 0,
                 sessions INTEGER DEFAULT 0,
                 total_accounts INTEGER DEFAULT 0,
                 registrations INTEGER DEFAULT 0,
-                
+
                 -- Messages data
                 messages INTEGER DEFAULT 0,
                 companion_chats INTEGER DEFAULT 0,
                 chat_room_user_chats INTEGER DEFAULT 0,
+                chat_room_simulation_chats INTEGER DEFAULT 0,
                 total_user_chats INTEGER DEFAULT 0,
-                
+
+                -- Payment methods data
+                payment_methods INTEGER DEFAULT 0,
+                payment_methods_canceled INTEGER DEFAULT 0,
+
+                -- Revenue data
+                revenue_successful_cents INTEGER DEFAULT 0,
+                revenue_successful_dollars REAL DEFAULT 0.0,
+                revenue_successful_count INTEGER DEFAULT 0,
+                revenue_failed_cents INTEGER DEFAULT 0,
+                revenue_failed_dollars REAL DEFAULT 0.0,
+                revenue_failed_count INTEGER DEFAULT 0,
+
                 -- Other metrics
                 media INTEGER DEFAULT 0,
-                payment_methods INTEGER DEFAULT 0,
                 converted_users INTEGER DEFAULT 0,
                 terms_acceptances INTEGER DEFAULT 0,
-                
+
                 sync_timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (campaign_id, unix_hour),
                 FOREIGN KEY (campaign_id) REFERENCES campaigns (id)

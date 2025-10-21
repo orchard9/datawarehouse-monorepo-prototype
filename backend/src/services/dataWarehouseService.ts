@@ -182,21 +182,39 @@ export class DataWarehouseCampaignService {
       const sql = `
         SELECT
           c.*,
-          ch.network,
-          ch.domain,
-          ch.placement,
-          ch.targeting,
-          ch.special,
+          COALESCE(cho.network, ch.network) as network,
+          COALESCE(cho.domain, ch.domain) as domain,
+          COALESCE(cho.placement, ch.placement) as placement,
+          COALESCE(cho.targeting, ch.targeting) as targeting,
+          COALESCE(cho.special, ch.special) as special,
           ch.mapping_confidence,
           COALESCE(SUM(hd.sessions), 0) as total_sessions,
           COALESCE(SUM(hd.registrations), 0) as total_registrations,
           COALESCE(SUM(hd.messages), 0) as total_messages,
           COALESCE(SUM(hd.converted_users), 0) as total_converted_users,
           COALESCE(SUM(hd.total_accounts), 0) as total_accounts,
+          COALESCE(SUM(hd.facebook_accounts), 0) as total_facebook_accounts,
+          COALESCE(SUM(hd.email_accounts), 0) as total_email_accounts,
+          COALESCE(SUM(hd.google_accounts), 0) as total_google_accounts,
+          COALESCE(SUM(hd.companion_chats), 0) as total_companion_chats,
+          COALESCE(SUM(hd.chat_room_user_chats), 0) as total_chat_room_user_chats,
+          COALESCE(SUM(hd.chat_room_simulation_chats), 0) as total_chat_room_simulation_chats,
+          COALESCE(SUM(hd.total_user_chats), 0) as total_user_chats,
+          COALESCE(SUM(hd.payment_methods), 0) as total_payment_methods,
+          COALESCE(SUM(hd.payment_methods_canceled), 0) as total_payment_methods_canceled,
+          COALESCE(SUM(hd.revenue_successful_cents), 0) as total_revenue_successful_cents,
+          COALESCE(SUM(hd.revenue_successful_dollars), 0) as total_revenue_successful_dollars,
+          COALESCE(SUM(hd.revenue_successful_count), 0) as total_revenue_successful_count,
+          COALESCE(SUM(hd.revenue_failed_cents), 0) as total_revenue_failed_cents,
+          COALESCE(SUM(hd.revenue_failed_dollars), 0) as total_revenue_failed_dollars,
+          COALESCE(SUM(hd.revenue_failed_count), 0) as total_revenue_failed_count,
+          COALESCE(SUM(hd.media), 0) as total_media,
+          COALESCE(SUM(hd.terms_acceptances), 0) as total_terms_acceptances,
           COUNT(hd.unix_hour) as data_point_count,
           MAX(datetime(hd.unix_hour * 3600, 'unixepoch')) as last_activity_date
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
+        LEFT JOIN campaign_hierarchy_overrides cho ON c.id = cho.campaign_id AND cho.is_active = 1
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         ${mainQueryWhereClause}
         GROUP BY c.id, ch.id
@@ -236,6 +254,24 @@ export class DataWarehouseCampaignService {
           totalMessages,
           totalConvertedUsers: row.total_converted_users || 0,
           totalAccounts: row.total_accounts || 0,
+          totalCreditCards: row.total_credit_cards || 0,
+          totalEmailAccounts: row.total_email_accounts || 0,
+          totalGoogleAccounts: row.total_google_accounts || 0,
+          totalFacebookAccounts: row.total_facebook_accounts || 0,
+          totalCompanionChats: row.total_companion_chats || 0,
+          totalChatRoomUserChats: row.total_chat_room_user_chats || 0,
+          totalChatRoomSimulationChats: row.total_chat_room_simulation_chats || 0,
+          totalTotalUserChats: row.total_total_user_chats || 0,
+          totalPaymentMethods: row.total_payment_methods || 0,
+          totalPaymentMethodsCanceled: row.total_payment_methods_canceled || 0,
+          totalRevenueSuccessfulCents: row.total_revenue_successful_cents || 0,
+          totalRevenueSuccessfulDollars: row.total_revenue_successful_dollars || 0,
+          totalRevenueSuccessfulCount: row.total_revenue_successful_count || 0,
+          totalRevenueFailedCents: row.total_revenue_failed_cents || 0,
+          totalRevenueFailedDollars: row.total_revenue_failed_dollars || 0,
+          totalRevenueFailedCount: row.total_revenue_failed_count || 0,
+          totalMedia: row.total_media || 0,
+          totalTermsAcceptances: row.total_terms_acceptances || 0,
           registrationRate: totalSessions > 0 ? (totalRegistrations / totalSessions) * 100 : 0,
           conversionRate: totalRegistrations > 0 ? (row.total_converted_users / totalRegistrations) * 100 : 0,
           messageRate: totalSessions > 0 ? (totalMessages / totalSessions) * 100 : 0,
@@ -313,11 +349,11 @@ export class DataWarehouseCampaignService {
         SELECT
           c.*,
           ch.id as hierarchy_id,
-          ch.network,
-          ch.domain,
-          ch.placement,
-          ch.targeting,
-          ch.special,
+          COALESCE(cho.network, ch.network) as network,
+          COALESCE(cho.domain, ch.domain) as domain,
+          COALESCE(cho.placement, ch.placement) as placement,
+          COALESCE(cho.targeting, ch.targeting) as targeting,
+          COALESCE(cho.special, ch.special) as special,
           ch.mapping_confidence,
           ch.created_at as hierarchy_created_at,
           ch.updated_at as hierarchy_updated_at,
@@ -326,11 +362,30 @@ export class DataWarehouseCampaignService {
           COALESCE(SUM(hd.messages), 0) as total_messages,
           COALESCE(SUM(hd.converted_users), 0) as total_converted_users,
           COALESCE(SUM(hd.total_accounts), 0) as total_accounts,
+          COALESCE(SUM(hd.credit_cards), 0) as total_credit_cards,
+          COALESCE(SUM(hd.email_accounts), 0) as total_email_accounts,
+          COALESCE(SUM(hd.google_accounts), 0) as total_google_accounts,
+          COALESCE(SUM(hd.facebook_accounts), 0) as total_facebook_accounts,
+          COALESCE(SUM(hd.companion_chats), 0) as total_companion_chats,
+          COALESCE(SUM(hd.chat_room_user_chats), 0) as total_chat_room_user_chats,
+          COALESCE(SUM(hd.chat_room_simulation_chats), 0) as total_chat_room_simulation_chats,
+          COALESCE(SUM(hd.total_user_chats), 0) as total_total_user_chats,
+          COALESCE(SUM(hd.payment_methods), 0) as total_payment_methods,
+          COALESCE(SUM(hd.payment_methods_canceled), 0) as total_payment_methods_canceled,
+          COALESCE(SUM(hd.revenue_successful_cents), 0) as total_revenue_successful_cents,
+          COALESCE(SUM(hd.revenue_successful_dollars), 0) as total_revenue_successful_dollars,
+          COALESCE(SUM(hd.revenue_successful_count), 0) as total_revenue_successful_count,
+          COALESCE(SUM(hd.revenue_failed_cents), 0) as total_revenue_failed_cents,
+          COALESCE(SUM(hd.revenue_failed_dollars), 0) as total_revenue_failed_dollars,
+          COALESCE(SUM(hd.revenue_failed_count), 0) as total_revenue_failed_count,
+          COALESCE(SUM(hd.media), 0) as total_media,
+          COALESCE(SUM(hd.terms_acceptances), 0) as total_terms_acceptances,
           COUNT(hd.unix_hour) as data_point_count,
           MIN(datetime(hd.unix_hour * 3600, 'unixepoch')) as first_activity_date,
           MAX(datetime(hd.unix_hour * 3600, 'unixepoch')) as last_activity_date
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
+        LEFT JOIN campaign_hierarchy_overrides cho ON c.id = cho.campaign_id AND cho.is_active = 1
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         WHERE c.id = ?
         GROUP BY c.id, ch.id
@@ -956,15 +1011,24 @@ export class DataWarehouseMetricsService {
           SUM(credit_cards) as credit_cards,
           SUM(email_accounts) as email_accounts,
           SUM(google_accounts) as google_accounts,
+          SUM(facebook_accounts) as facebook_accounts,
           SUM(sessions) as sessions,
           SUM(total_accounts) as total_accounts,
           SUM(registrations) as registrations,
           SUM(messages) as messages,
           SUM(companion_chats) as companion_chats,
           SUM(chat_room_user_chats) as chat_room_user_chats,
+          SUM(chat_room_simulation_chats) as chat_room_simulation_chats,
           SUM(total_user_chats) as total_user_chats,
           SUM(media) as media,
           SUM(payment_methods) as payment_methods,
+          SUM(payment_methods_canceled) as payment_methods_canceled,
+          SUM(revenue_successful_cents) as revenue_successful_cents,
+          SUM(revenue_successful_dollars) as revenue_successful_dollars,
+          SUM(revenue_successful_count) as revenue_successful_count,
+          SUM(revenue_failed_cents) as revenue_failed_cents,
+          SUM(revenue_failed_dollars) as revenue_failed_dollars,
+          SUM(revenue_failed_count) as revenue_failed_count,
           SUM(converted_users) as converted_users,
           SUM(terms_acceptances) as terms_acceptances
         FROM hourly_data
@@ -983,15 +1047,24 @@ export class DataWarehouseMetricsService {
           credit_cards: row.credit_cards || 0,
           email_accounts: row.email_accounts || 0,
           google_accounts: row.google_accounts || 0,
+          facebook_accounts: row.facebook_accounts || 0,
           sessions: row.sessions || 0,
           total_accounts: row.total_accounts || 0,
           registrations: row.registrations || 0,
           messages: row.messages || 0,
           companion_chats: row.companion_chats || 0,
           chat_room_user_chats: row.chat_room_user_chats || 0,
+          chat_room_simulation_chats: row.chat_room_simulation_chats || 0,
           total_user_chats: row.total_user_chats || 0,
           media: row.media || 0,
           payment_methods: row.payment_methods || 0,
+          payment_methods_canceled: row.payment_methods_canceled || 0,
+          revenue_successful_cents: row.revenue_successful_cents || 0,
+          revenue_successful_dollars: row.revenue_successful_dollars || 0,
+          revenue_successful_count: row.revenue_successful_count || 0,
+          revenue_failed_cents: row.revenue_failed_cents || 0,
+          revenue_failed_dollars: row.revenue_failed_dollars || 0,
+          revenue_failed_count: row.revenue_failed_count || 0,
           converted_users: row.converted_users || 0,
           terms_acceptances: row.terms_acceptances || 0,
           sync_timestamp: ''
@@ -2029,7 +2102,7 @@ export class DataWarehouseHierarchyOverrideService {
         SET is_active = 0
         WHERE campaign_id = ? AND is_active = 1
       `;
-      db.executeQuery(deactivateSql, [campaignId]);
+      db.executeWriteOperation(deactivateSql, [campaignId]);
 
       // Insert new override
       const insertSql = `
@@ -2039,7 +2112,7 @@ export class DataWarehouseHierarchyOverrideService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)
       `;
 
-      db.executeQuery(insertSql, [
+      db.executeWriteOperation(insertSql, [
         campaignId,
         overrideData.network || null,
         overrideData.domain || null,

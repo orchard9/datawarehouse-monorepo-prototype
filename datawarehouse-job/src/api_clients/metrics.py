@@ -11,7 +11,7 @@ class MetricsClient(BaseApiClient):
     """Client for metrics API endpoint"""
     
     def get_metrics(self, start_time: int, end_time: int, bucket: str = "one_hour",
-                   metrics: str = "registrations,messages,media,payment_methods,terms_acceptances",
+                   metrics: str = "registrations,messages,media,payment_methods,charge_revenue,terms_acceptances",
                    campaign_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
         """
         Fetch metrics data from the API
@@ -123,12 +123,12 @@ class MetricsClient(BaseApiClient):
         end_time = int(time.time() * 1000)
         start_time = end_time - (hours_back * 60 * 60 * 1000)
         
-        # For hourly campaign-specific data, registrations and payment_methods are supported
+        # For hourly campaign-specific data, get all supported metrics
         return self.get_metrics(
             start_time=start_time,
             end_time=end_time,
             bucket="one_hour",
-            metrics="registrations,payment_methods",
+            metrics="registrations,messages,media,payment_methods,charge_revenue,terms_acceptances",
             campaign_ids=[campaign_id]
         )
     
@@ -177,7 +177,7 @@ class MetricsClient(BaseApiClient):
                         start_time=start_time_ms,
                         end_time=end_time_ms,
                         bucket="one_hour",
-                        metrics="registrations,payment_methods",
+                        metrics="registrations,messages,media,payment_methods,charge_revenue,terms_acceptances",
                         campaign_ids=[campaign_id]
                     )
                     
@@ -279,41 +279,57 @@ class MetricsClient(BaseApiClient):
         # Parse payment methods
         payment_methods = metrics.get('payment_methods', {})
         payment_methods_data = payment_methods.get('payment_methods', {})
-        
+
         # Parse terms acceptances
         terms_acceptances = metrics.get('terms_acceptances', {})
-        
+
         # Parse media metrics
         media = metrics.get('media', {})
-        
+
+        # Parse charge revenue
+        charge_revenue = metrics.get('charge_revenue', {})
+
         # Calculate proper sessions and registrations
         anonymous_sessions = registrations.get('anonymous', 0)
         email_regs = registrations.get('email', 0)
         google_regs = registrations.get('google', 0)
         facebook_regs = registrations.get('facebook', 0)
         actual_registrations = email_regs + google_regs + facebook_regs
-        
+
         return {
             'campaign_id': campaign_id,
             'unix_hour': unix_hour,
-            
+
             # Registration data
             'credit_cards': payment_methods_data.get('added', 0),  # Credit cards from payment methods added
             'email_accounts': email_regs,
             'google_accounts': google_regs,
+            'facebook_accounts': facebook_regs,
             'sessions': anonymous_sessions,  # Anonymous users represent sessions
             'total_accounts': registrations.get('total', 0),
             'registrations': actual_registrations,  # Actual registrations excluding anonymous
-            
+
             # Messages data
             'messages': messages.get('total', 0) if isinstance(messages, dict) else 0,
             'companion_chats': messages.get('companion_chats', 0) if isinstance(messages, dict) else 0,
             'chat_room_user_chats': messages.get('chat_room_user_chats', 0) if isinstance(messages, dict) else 0,
+            'chat_room_simulation_chats': messages.get('chat_room_simulation_chats', 0) if isinstance(messages, dict) else 0,
             'total_user_chats': messages.get('total_user_chats', 0) if isinstance(messages, dict) else 0,
-            
+
+            # Payment methods data
+            'payment_methods': payment_methods_data.get('added', 0),
+            'payment_methods_canceled': payment_methods_data.get('canceled', 0),
+
+            # Revenue data
+            'revenue_successful_cents': charge_revenue.get('successful_amount_cents', 0),
+            'revenue_successful_dollars': charge_revenue.get('successful_amount_dollars', 0.0),
+            'revenue_successful_count': charge_revenue.get('successful_count', 0),
+            'revenue_failed_cents': charge_revenue.get('failed_amount_cents', 0),
+            'revenue_failed_dollars': charge_revenue.get('failed_amount_dollars', 0.0),
+            'revenue_failed_count': charge_revenue.get('failed_count', 0),
+
             # Other metrics
             'media': media.get('total', 0) if isinstance(media, dict) else 0,
-            'payment_methods': payment_methods_data.get('added', 0),
             'converted_users': 0,  # Not directly provided, will be calculated
             'terms_acceptances': terms_acceptances.get('count', 0)
         }

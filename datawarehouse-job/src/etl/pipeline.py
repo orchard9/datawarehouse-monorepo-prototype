@@ -625,7 +625,7 @@ class ETLPipeline:
                         start_time=start_ms,
                         end_time=end_ms,
                         bucket="one_hour",
-                        metrics="registrations,payment_methods",
+                        metrics="registrations,messages,media,payment_methods,charge_revenue,terms_acceptances",
                         campaign_ids=[campaign_id]
                     )
                     

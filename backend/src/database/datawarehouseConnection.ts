@@ -400,6 +400,66 @@ class DataWarehouseConnection {
       throw error;
     }
   }
+
+  /**
+   * Execute a write operation (INSERT, UPDATE, DELETE)
+   * Opens a temporary writable connection for the operation
+   */
+  executeWriteOperation(sql: string, params: any[] = []): void {
+    if (!fs.existsSync(this.dbPath)) {
+      throw new Error(`Data warehouse database file does not exist: ${this.dbPath}`);
+    }
+
+    let writableDb: DatabaseType | null = null;
+
+    try {
+      const startTime = Date.now();
+
+      // Create temporary writable connection for this operation
+      writableDb = new Database(this.dbPath, {
+        readonly: false,
+        fileMustExist: true,
+        timeout: 10000
+      });
+
+      const stmt = writableDb.prepare(sql);
+      const result = stmt.run(params);
+      const queryTime = Date.now() - startTime;
+
+      logger.debug('Data warehouse write operation completed', {
+        sql: sql.substring(0, 100) + '...',
+        changes: result.changes,
+        queryTime,
+        paramCount: params.length
+      });
+
+      if (queryTime > 1000) {
+        logger.warn('Slow data warehouse write operation detected', {
+          sql: sql.substring(0, 100) + '...',
+          queryTime,
+          paramCount: params.length
+        });
+      }
+    } catch (error) {
+      logger.error('Data warehouse write operation failed', {
+        sql: sql.substring(0, 100) + '...',
+        error: error instanceof Error ? error.message : String(error),
+        paramCount: params.length
+      });
+      throw error;
+    } finally {
+      // Always close the writable connection
+      if (writableDb) {
+        try {
+          writableDb.close();
+        } catch (closeError) {
+          logger.warn('Error closing writable database connection', {
+            error: closeError instanceof Error ? closeError.message : String(closeError)
+          });
+        }
+      }
+    }
+  }
 }
 
 // Create singleton instance for data warehouse
