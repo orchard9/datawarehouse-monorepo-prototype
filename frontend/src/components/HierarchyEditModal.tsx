@@ -152,16 +152,57 @@ export const HierarchyEditModal: React.FC<HierarchyEditModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate at least one field is different
-    const hasChanges =
-      formData.network !== currentHierarchy.network ||
-      formData.domain !== currentHierarchy.domain ||
-      formData.placement !== currentHierarchy.placement ||
-      formData.targeting !== currentHierarchy.targeting ||
-      formData.special !== currentHierarchy.special;
+    // Helper function to clean string values: trim and convert empty strings to undefined
+    const cleanValue = (value: string): string | undefined => {
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    };
+
+    // Build the update payload with cleaned values
+    const payload: {
+      network?: string;
+      domain?: string;
+      placement?: string;
+      targeting?: string;
+      special?: string;
+      override_reason?: string;
+      overridden_by: string;
+    } = {
+      overridden_by: 'user', // TODO: Get from auth context
+    };
+
+    // Only include fields that have changed and have non-empty values
+    const cleanedNetwork = cleanValue(formData.network);
+    const cleanedDomain = cleanValue(formData.domain);
+    const cleanedPlacement = cleanValue(formData.placement);
+    const cleanedTargeting = cleanValue(formData.targeting);
+    const cleanedSpecial = cleanValue(formData.special);
+    const cleanedReason = cleanValue(formData.override_reason);
+
+    if (formData.network !== currentHierarchy.network && cleanedNetwork) {
+      payload.network = cleanedNetwork;
+    }
+    if (formData.domain !== currentHierarchy.domain && cleanedDomain) {
+      payload.domain = cleanedDomain;
+    }
+    if (formData.placement !== currentHierarchy.placement && cleanedPlacement) {
+      payload.placement = cleanedPlacement;
+    }
+    if (formData.targeting !== currentHierarchy.targeting && cleanedTargeting) {
+      payload.targeting = cleanedTargeting;
+    }
+    if (formData.special !== currentHierarchy.special && cleanedSpecial) {
+      payload.special = cleanedSpecial;
+    }
+    if (cleanedReason) {
+      payload.override_reason = cleanedReason;
+    }
+
+    // Validate at least one field is being updated
+    const hasChanges = !!(payload.network || payload.domain || payload.placement || payload.targeting || payload.special);
 
     if (!hasChanges) {
-      setError('No changes detected. Please modify at least one field.');
+      setError('No changes detected. Please modify at least one field with a non-empty value.');
       return;
     }
 
@@ -169,15 +210,7 @@ export const HierarchyEditModal: React.FC<HierarchyEditModalProps> = ({
     setError(null);
 
     try {
-      await onSave({
-        network: formData.network !== currentHierarchy.network ? formData.network : undefined,
-        domain: formData.domain !== currentHierarchy.domain ? formData.domain : undefined,
-        placement: formData.placement !== currentHierarchy.placement ? formData.placement : undefined,
-        targeting: formData.targeting !== currentHierarchy.targeting ? formData.targeting : undefined,
-        special: formData.special !== currentHierarchy.special ? formData.special : undefined,
-        override_reason: formData.override_reason || undefined,
-        overridden_by: 'user', // TODO: Get from auth context
-      });
+      await onSave(payload);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save hierarchy override');

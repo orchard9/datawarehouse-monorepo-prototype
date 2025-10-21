@@ -6,7 +6,7 @@
 // Dashboard Filter Types
 export interface DashboardFilters {
   search: string;
-  status: 'all' | 'live' | 'paused';
+  status: 'all' | 'live' | 'paused' | 'unknown';
   dateRange: string;
   startDate?: string;
   endDate?: string;
@@ -60,6 +60,8 @@ export interface Campaign {
   updated_at: string;
   slug: string;
   path: string | null;
+  cost: number;
+  status: 'live' | 'paused' | 'unknown';
   sync_timestamp: string;
   metrics?: CampaignMetrics;
   hierarchy?: CampaignHierarchy;

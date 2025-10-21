@@ -65,8 +65,8 @@ export class DataWarehouseCampaignService {
 
       // Build WHERE conditions
       if (status) {
-        conditions.push('c.is_serving = ?');
-        params.push(status === 'active' ? 1 : 0);
+        conditions.push('c.status = ?');
+        params.push(status);
       }
 
       if (isServing !== undefined) {
@@ -112,15 +112,18 @@ export class DataWarehouseCampaignService {
       }
 
       // Date range filters
+      let startUnixHour: number | undefined;
+      let endUnixHour: number | undefined;
+
       if (startDate || endDate) {
         conditions.push('EXISTS (SELECT 1 FROM hourly_data hd WHERE hd.campaign_id = c.id');
         if (startDate) {
-          const startUnixHour = Math.floor(new Date(startDate).getTime() / 1000 / 3600);
+          startUnixHour = Math.floor(new Date(startDate).getTime() / 1000 / 3600);
           conditions[conditions.length - 1] += ' AND hd.unix_hour >= ?';
           params.push(startUnixHour);
         }
         if (endDate) {
-          const endUnixHour = Math.floor(new Date(endDate).getTime() / 1000 / 3600);
+          endUnixHour = Math.floor(new Date(endDate).getTime() / 1000 / 3600);
           conditions[conditions.length - 1] += ' AND hd.unix_hour <= ?';
           params.push(endUnixHour);
         }
@@ -128,6 +131,27 @@ export class DataWarehouseCampaignService {
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Build additional WHERE conditions for filtering hourly_data in the main aggregation query
+      // This ensures SUM() aggregations only include data within the selected date range
+      const dateFilterConditions: string[] = [];
+      const dateFilterParams: any[] = [];
+
+      if (startUnixHour !== undefined) {
+        dateFilterConditions.push('(hd.unix_hour IS NULL OR hd.unix_hour >= ?)');
+        dateFilterParams.push(startUnixHour);
+      }
+
+      if (endUnixHour !== undefined) {
+        dateFilterConditions.push('(hd.unix_hour IS NULL OR hd.unix_hour <= ?)');
+        dateFilterParams.push(endUnixHour);
+      }
+
+      // Combine base WHERE clause with date filter conditions for the main query
+      const mainQueryWhereClause = whereClause +
+        (dateFilterConditions.length > 0
+          ? (whereClause ? ' AND ' : 'WHERE ') + dateFilterConditions.join(' AND ')
+          : '');
 
       // Validate orderBy column and build order clause
       const validOrderColumns = ['name', 'created_at', 'updated_at', 'sync_timestamp', 'traffic_weight', 'sessions', 'registrations'];
@@ -174,13 +198,13 @@ export class DataWarehouseCampaignService {
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
-        ${whereClause}
+        ${mainQueryWhereClause}
         GROUP BY c.id, ch.id
         ${orderClause}
         LIMIT ? OFFSET ?
       `;
 
-      const campaigns = db.executeQuery<any>(sql, [...params, limit, offset]);
+      const campaigns = db.executeQuery<any>(sql, [...params, ...dateFilterParams, limit, offset]);
 
       // Transform to typed response with metrics calculation
       const campaignsWithMetrics: DataWarehouseCampaignWithMetrics[] = campaigns.map(row => {
@@ -197,6 +221,8 @@ export class DataWarehouseCampaignService {
           updated_at: row.updated_at,
           slug: row.slug,
           path: row.path,
+          cost: row.cost || 0,
+          status: row.status || 'unknown',
           sync_timestamp: row.sync_timestamp
         };
 
@@ -326,6 +352,8 @@ export class DataWarehouseCampaignService {
         updated_at: dbResult.updated_at,
         slug: dbResult.slug,
         path: dbResult.path,
+        cost: dbResult.cost || 0,
+        status: dbResult.status || 'unknown',
         sync_timestamp: dbResult.sync_timestamp
       };
 
@@ -608,6 +636,128 @@ conn.close()
 
     } catch (error) {
       return ErrorUtils.handleDatabaseError(error, 'getCampaignHierarchy');
+    }
+  }
+
+  /**
+   * Update campaign cost
+   */
+  static async updateCampaignCost(campaignId: number, cost: number): Promise<DataWarehouseCampaign> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(!isNaN(cost) && cost >= 0, 'Cost must be a non-negative number');
+
+      // Verify campaign exists first
+      await this.getCampaignById(campaignId);
+
+      // Update cost
+      const updateSql = `
+        UPDATE campaigns
+        SET cost = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `;
+
+      db.executeQuery(updateSql, [cost, campaignId]);
+
+      // Get updated campaign
+      const updatedCampaign = await this.getCampaignById(campaignId);
+
+      logger.info('Updated campaign cost', {
+        campaignId,
+        cost,
+        name: updatedCampaign.name
+      });
+
+      return {
+        id: updatedCampaign.id,
+        name: updatedCampaign.name,
+        description: updatedCampaign.description,
+        tracking_url: updatedCampaign.tracking_url,
+        is_serving: updatedCampaign.is_serving,
+        serving_url: updatedCampaign.serving_url,
+        traffic_weight: updatedCampaign.traffic_weight,
+        deleted_at: updatedCampaign.deleted_at,
+        created_at: updatedCampaign.created_at,
+        updated_at: updatedCampaign.updated_at,
+        slug: updatedCampaign.slug,
+        path: updatedCampaign.path,
+        cost: cost,
+        status: updatedCampaign.status,
+        sync_timestamp: updatedCampaign.sync_timestamp
+      };
+
+    } catch (error) {
+      logger.error('Failed to update campaign cost', {
+        campaignId,
+        cost,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'updateCampaignCost');
+      throw error;
+    }
+  }
+
+  /**
+   * Update campaign status
+   */
+  static async updateCampaignStatus(campaignId: number, status: 'live' | 'paused' | 'unknown'): Promise<DataWarehouseCampaign> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(['live', 'paused', 'unknown'].includes(status), 'Status must be one of: live, paused, unknown');
+
+      // Verify campaign exists first
+      await this.getCampaignById(campaignId);
+
+      // Update status
+      const updateSql = `
+        UPDATE campaigns
+        SET status = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `;
+
+      db.executeQuery(updateSql, [status, campaignId]);
+
+      // Get updated campaign
+      const updatedCampaign = await this.getCampaignById(campaignId);
+
+      logger.info('Updated campaign status', {
+        campaignId,
+        status,
+        name: updatedCampaign.name
+      });
+
+      return {
+        id: updatedCampaign.id,
+        name: updatedCampaign.name,
+        description: updatedCampaign.description,
+        tracking_url: updatedCampaign.tracking_url,
+        is_serving: updatedCampaign.is_serving,
+        serving_url: updatedCampaign.serving_url,
+        traffic_weight: updatedCampaign.traffic_weight,
+        deleted_at: updatedCampaign.deleted_at,
+        created_at: updatedCampaign.created_at,
+        updated_at: updatedCampaign.updated_at,
+        slug: updatedCampaign.slug,
+        path: updatedCampaign.path,
+        cost: updatedCampaign.cost,
+        status: status,
+        sync_timestamp: updatedCampaign.sync_timestamp
+      };
+
+    } catch (error) {
+      logger.error('Failed to update campaign status', {
+        campaignId,
+        status,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'updateCampaignStatus');
+      throw error;
     }
   }
 
@@ -1080,6 +1230,8 @@ export class DataWarehouseMetricsService {
             updated_at: row.updated_at,
             slug: row.slug,
             path: row.path,
+            cost: row.cost || 0,
+            status: row.status || 'unknown',
             sync_timestamp: row.sync_timestamp
           },
           rank: index + 1,

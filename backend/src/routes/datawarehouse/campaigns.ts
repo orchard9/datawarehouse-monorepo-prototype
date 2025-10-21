@@ -33,8 +33,8 @@ const CampaignQuerySchema = z.object({
 });
 
 const MetricsQuerySchema = z.object({
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: z.string().optional(), // Allow date strings without strict datetime validation
+  endDate: z.string().optional(),   // Allow date strings without strict datetime validation
   groupBy: z.enum(['hour', 'day', 'week', 'month']).optional(),
   hourStart: z.coerce.number().int().min(0).max(23).optional(),
   hourEnd: z.coerce.number().int().min(0).max(23).optional(),
@@ -72,6 +72,16 @@ const HierarchyOverrideSchema = z.object({
 
 const HierarchyHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional()
+});
+
+const CampaignCostUpdateSchema = z.object({
+  cost: z.number().min(0, 'Cost must be a non-negative number')
+});
+
+const CampaignStatusUpdateSchema = z.object({
+  status: z.enum(['live', 'paused', 'unknown'], {
+    errorMap: () => ({ message: 'Status must be one of: live, paused, unknown' })
+  })
 });
 
 // Validation middleware
@@ -204,6 +214,52 @@ const validateHierarchyHistoryQuery = (req: Request, res: Response, next: Functi
   }
 };
 
+const validateCampaignCostUpdate = (req: Request, res: Response, next: Function): void => {
+  try {
+    const validatedBody = CampaignCostUpdateSchema.parse(req.body);
+    (req as any).validatedBody = validatedBody;
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message,
+        value: (err as any).input ?? 'unknown'
+      }));
+
+      res.error('Validation failed', 400, {
+        code: 'VALIDATION_ERROR',
+        errors: validationErrors
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
+const validateCampaignStatusUpdate = (req: Request, res: Response, next: Function): void => {
+  try {
+    const validatedBody = CampaignStatusUpdateSchema.parse(req.body);
+    (req as any).validatedBody = validatedBody;
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message,
+        value: (err as any).input ?? 'unknown'
+      }));
+
+      res.error('Validation failed', 400, {
+        code: 'VALIDATION_ERROR',
+        errors: validationErrors
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
 /**
  * GET /api/datawarehouse/campaigns
  * List all campaigns with optional filtering and pagination
@@ -310,6 +366,46 @@ router.get('/:id/activity', validateCampaignId, validateActivityQuery, ErrorUtil
   } else {
     res.error('Failed to retrieve campaign activity', 500, 'SERVICE_ERROR');
   }
+}));
+
+/**
+ * PATCH /api/datawarehouse/campaigns/:id/cost
+ * Update campaign cost
+ */
+router.patch('/:id/cost', validateCampaignId, validateCampaignCostUpdate, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const { cost } = (req as any).validatedBody;
+
+  logger.info('Updating campaign cost', {
+    campaignId,
+    cost,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const updatedCampaign = await DataWarehouseCampaignService.updateCampaignCost(campaignId, cost);
+
+  res.success(updatedCampaign, 'Campaign cost updated successfully');
+}));
+
+/**
+ * PATCH /api/datawarehouse/campaigns/:id/status
+ * Update campaign status
+ */
+router.patch('/:id/status', validateCampaignId, validateCampaignStatusUpdate, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const { status } = (req as any).validatedBody;
+
+  logger.info('Updating campaign status', {
+    campaignId,
+    status,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const updatedCampaign = await DataWarehouseCampaignService.updateCampaignStatus(campaignId, status);
+
+  res.success(updatedCampaign, 'Campaign status updated successfully');
 }));
 
 /**

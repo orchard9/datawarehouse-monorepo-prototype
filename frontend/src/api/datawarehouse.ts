@@ -152,6 +152,36 @@ export const campaignApi = {
       };
     }>(`${BASE_PATH}/campaigns/${id}/hierarchy`, data);
   },
+
+  /**
+   * Update campaign status
+   */
+  async updateCampaignStatus(
+    id: number,
+    data: {
+      status: 'live' | 'paused' | 'unknown';
+    }
+  ) {
+    return api.patch<{
+      success: boolean;
+      campaign: Campaign;
+    }>(`${BASE_PATH}/campaigns/${id}/status`, data);
+  },
+
+  /**
+   * Update campaign cost
+   */
+  async updateCampaignCost(
+    id: number,
+    data: {
+      cost: number;
+    }
+  ) {
+    return api.patch<{
+      success: boolean;
+      campaign: Campaign;
+    }>(`${BASE_PATH}/campaigns/${id}/cost`, data);
+  },
 };
 
 /**

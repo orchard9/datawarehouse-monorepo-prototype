@@ -117,6 +117,8 @@ export interface DataWarehouseCampaign {
   updated_at: string;
   slug?: string;
   path?: string;
+  cost: number;
+  status: 'live' | 'paused' | 'unknown';
   sync_timestamp: string;
 }
 
@@ -342,7 +344,7 @@ export interface ImportResult {
 
 // Data Warehouse specific query types
 export interface DataWarehouseCampaignQuery extends PaginationQuery, DateRangeQuery {
-  status?: string;
+  status?: 'live' | 'paused' | 'unknown';
   isServing?: boolean;
   hasData?: boolean;
   search?: string;

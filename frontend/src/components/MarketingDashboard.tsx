@@ -130,12 +130,9 @@ const MarketingDashboard: React.FC = () => {
     params.append('includeMetrics', 'true');
     params.append('includeHierarchy', 'true');
 
-    console.log('Export: filters.status =', filters.status);
     if (filters.search) params.append('search', filters.search);
     if (filters.status !== 'all') {
-      const isServingValue = filters.status === 'live' ? 'true' : 'false';
-      console.log('Export: adding isServing =', isServingValue);
-      params.append('isServing', isServingValue);
+      params.append('status', filters.status);
     }
     if (filters.startDate) params.append('startDate', filters.startDate);
     if (filters.endDate) params.append('endDate', filters.endDate);
@@ -145,7 +142,6 @@ const MarketingDashboard: React.FC = () => {
 
     // Trigger download
     const url = `http://localhost:37951/api/datawarehouse/export/csv?${params.toString()}`;
-    console.log('Export URL:', url);
     window.open(url, '_blank');
   };
 
@@ -172,7 +168,7 @@ const MarketingDashboard: React.FC = () => {
     }
 
     if (filters.status !== 'all') {
-      baseQuery.isServing = filters.status === 'live';
+      baseQuery.status = filters.status;
     }
 
     // Date range handling
@@ -265,6 +261,7 @@ const MarketingDashboard: React.FC = () => {
         acc.totalConvertedUsers += metrics.totalConvertedUsers || 0;
         acc.totalAccounts += metrics.totalAccounts || 0;
       }
+      acc.totalCost += campaign.cost || 0;
       return acc;
     }, {
       totalSessions: 0,
@@ -272,11 +269,12 @@ const MarketingDashboard: React.FC = () => {
       totalMessages: 0,
       totalConvertedUsers: 0,
       totalAccounts: 0,
+      totalCost: 0,
     });
 
-    // For demo purposes, calculate revenue and cost from session data
+    // Calculate revenue from conversions
     const totalRevenue = totals.totalConvertedUsers * 25.50; // Avg revenue per conversion
-    const totalCost = totals.totalSessions * 0.75; // Avg cost per session
+    const totalCost = totals.totalCost;
     const overallROI = totalCost > 0 ? ((totalRevenue - totalCost) / totalCost) * 100 : 0;
 
     return {
@@ -311,8 +309,8 @@ const MarketingDashboard: React.FC = () => {
       let aValue = 0;
       let bValue = 0;
 
-      const aCost = (a.metrics?.totalSessions || 0) * 0.75;
-      const bCost = (b.metrics?.totalSessions || 0) * 0.75;
+      const aCost = a.cost || 0;
+      const bCost = b.cost || 0;
       const aRevenue = (a.metrics?.totalConvertedUsers || 0) * 25.50;
       const bRevenue = (b.metrics?.totalConvertedUsers || 0) * 25.50;
 
@@ -329,6 +327,13 @@ const MarketingDashboard: React.FC = () => {
           aValue = aCost > 0 ? aRevenue / aCost : 0;
           bValue = bCost > 0 ? bRevenue / bCost : 0;
           break;
+        case 'cpc_unique': {
+          const aTotalSessions = a.metrics?.totalSessions || 0;
+          const bTotalSessions = b.metrics?.totalSessions || 0;
+          aValue = aTotalSessions > 0 ? aCost / aTotalSessions : 0;
+          bValue = bTotalSessions > 0 ? bCost / bTotalSessions : 0;
+          break;
+        }
         case 'cpr_confirm':
           aValue = (a.metrics?.totalRegistrations || 0) > 0 ? aCost / (a.metrics?.totalRegistrations || 0) : 0;
           bValue = (b.metrics?.totalRegistrations || 0) > 0 ? bCost / (b.metrics?.totalRegistrations || 0) : 0;
@@ -353,12 +358,16 @@ const MarketingDashboard: React.FC = () => {
 
   // Prepare chart data from campaigns
   const chartData = useMemo<ChartData[]>(() => {
-    return filteredAndSortedCampaigns.slice(0, 5).map(campaign => ({
-      name: campaign.name.substring(0, 15),
-      cost: (campaign.metrics?.totalSessions || 0) * 0.75,
-      revenue: (campaign.metrics?.totalConvertedUsers || 0) * 25.50,
-      roas: ((campaign.metrics?.totalConvertedUsers || 0) * 25.50) / ((campaign.metrics?.totalSessions || 0) * 0.75 || 1),
-    }));
+    return filteredAndSortedCampaigns.slice(0, 5).map(campaign => {
+      const cost = campaign.cost || 0;
+      const revenue = (campaign.metrics?.totalConvertedUsers || 0) * 25.50;
+      return {
+        name: campaign.name.substring(0, 15),
+        cost,
+        revenue,
+        roas: cost > 0 ? revenue / cost : 0,
+      };
+    });
   }, [filteredAndSortedCampaigns]);
 
   // Sort handler - backend only supports: name, created_at, updated_at, sync_timestamp, traffic_weight, sessions, registrations
@@ -420,6 +429,7 @@ const MarketingDashboard: React.FC = () => {
     { value: 'all', label: 'All Campaigns' },
     { value: 'live', label: 'Live' },
     { value: 'paused', label: 'Paused' },
+    { value: 'unknown', label: 'Unknown' },
   ];
 
   // Calculate total pages
@@ -703,8 +713,7 @@ const MarketingDashboard: React.FC = () => {
             <select
               value={filters.status}
               onChange={(e) => {
-                console.log('Status changed to:', e.target.value);
-                updateFilter('status', e.target.value as 'all' | 'live' | 'paused');
+                updateFilter('status', e.target.value as 'all' | 'live' | 'paused' | 'unknown');
               }}
               className="w-full px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white text-gray-900 border border-gray-300"
             >
@@ -857,11 +866,11 @@ const MarketingDashboard: React.FC = () => {
            - Expected Field: campaign.metrics.rawClicks (number)
            - Calculation: Sum of all click events for the campaign
 
-        2. UNIQUE CLICKS
-           - Definition: Deduplicated click count (one click per unique user)
-           - Data Source: To be added to Peach AI API - tracking unique users who clicked
-           - Expected Field: campaign.metrics.uniqueClicks (number)
-           - Calculation: Count distinct users who clicked the ad
+        2. UNIQUE CLICKS - NOW DISPLAYS SESSIONS
+           - Definition: Total number of unique user sessions
+           - Data Source: Backend data from campaign.metrics.totalSessions
+           - Display: Actual count from database
+           - Note: Column displays sessions data per user request
 
         3. CPC (RAW)
            - Definition: Cost Per Click based on total clicks
@@ -999,11 +1008,11 @@ const MarketingDashboard: React.FC = () => {
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
                   <button
-                    onClick={() => handleSort('unique_clicks')}
+                    onClick={() => handleSort('sessions')}
                     className="flex items-center space-x-1 hover:opacity-80"
                   >
                     <span>UNIQUE CLICKS</span>
-                    {filters.sortBy === 'unique_clicks' && (
+                    {filters.sortBy === 'sessions' && (
                       filters.sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
                     )}
                   </button>
@@ -1037,17 +1046,6 @@ const MarketingDashboard: React.FC = () => {
                   >
                     <span>CPC (UNIQUE)</span>
                     {filters.sortBy === 'cpc_unique' && (
-                      filters.sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                    )}
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                  <button
-                    onClick={() => handleSort('sessions')}
-                    className="flex items-center space-x-1 hover:opacity-80"
-                  >
-                    <span>SESSIONS</span>
-                    {filters.sortBy === 'sessions' && (
                       filters.sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
                     )}
                   </button>
@@ -1167,25 +1165,26 @@ const MarketingDashboard: React.FC = () => {
             <tbody className="divide-y" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
               {loading ? (
                 <tr>
-                  <td colSpan={19} className="px-6 py-4 text-center" style={{ color: 'var(--muted-foreground)' }}>
+                  <td colSpan={18} className="px-6 py-4 text-center" style={{ color: 'var(--muted-foreground)' }}>
                     Loading campaigns...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={19} className="px-6 py-4 text-center" style={{ color: '#ef4444' }}>
+                  <td colSpan={18} className="px-6 py-4 text-center" style={{ color: '#ef4444' }}>
                     Error loading campaigns: {error.message}
                   </td>
                 </tr>
               ) : filteredAndSortedCampaigns.length === 0 ? (
                 <tr>
-                  <td colSpan={19} className="px-6 py-4 text-center" style={{ color: 'var(--muted-foreground)' }}>
+                  <td colSpan={18} className="px-6 py-4 text-center" style={{ color: 'var(--muted-foreground)' }}>
                     No campaigns found
                   </td>
                 </tr>
               ) : (
                 filteredAndSortedCampaigns.map((campaign) => {
-                  const cost = (campaign.metrics?.totalSessions || 0) * 0.75;
+                  const totalSessions = campaign.metrics?.totalSessions || 0;
+                  const cost = campaign.cost || 0;
                   const totalConvertedUsers = campaign.metrics?.totalConvertedUsers || 0;
                   const revenue = totalConvertedUsers * 25.50;
                   const roas = cost > 0 ? revenue / cost : 0;
@@ -1193,6 +1192,7 @@ const MarketingDashboard: React.FC = () => {
                   const cprConfirm = totalRegistrations > 0 ? cost / totalRegistrations : 0;
                   const cps = totalConvertedUsers > 0 ? cost / totalConvertedUsers : 0;
                   const rps = totalConvertedUsers > 0 ? revenue / totalConvertedUsers : 0;
+                  const cpcUnique = totalSessions > 0 ? cost / totalSessions : 0;
 
                   return (
                     <tr
@@ -1207,11 +1207,13 @@ const MarketingDashboard: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`status-badge rounded-full ${
-                          campaign.is_serving
+                          campaign.status === 'live'
                             ? 'status-active'
-                            : 'status-inactive'
+                            : campaign.status === 'paused'
+                            ? 'status-inactive'
+                            : 'bg-gray-100 text-gray-600'
                         }`}>
-                          {campaign.is_serving ? 'Live' : 'Paused'}
+                          {campaign.status === 'live' ? 'Live' : campaign.status === 'paused' ? 'Paused' : 'Unknown'}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -1231,8 +1233,8 @@ const MarketingDashboard: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
                         —
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
+                        {(campaign.metrics?.totalSessions || 0).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         ${cost.toFixed(2)}
@@ -1240,11 +1242,8 @@ const MarketingDashboard: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
                         —
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
-                        {(campaign.metrics?.totalSessions || 0).toLocaleString()}
+                        {cpcUnique > 0 ? `$${cpcUnique.toFixed(2)}` : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
                         —

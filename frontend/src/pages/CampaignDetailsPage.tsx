@@ -101,7 +101,7 @@ const CampaignDetailsPage: React.FC = () => {
 
   // URL-synced filters
   const [filters, setFilters] = useState<TimeBreakdownFilters>(() => ({
-    timeRange: (searchParams.get('timeRange') as TimeBreakdownFilters['timeRange']) || 'last7d',
+    timeRange: (searchParams.get('timeRange') as TimeBreakdownFilters['timeRange']) || 'last30d',
     groupBy: (searchParams.get('groupBy') as TimeBreakdownFilters['groupBy']) || 'day',
     startDate: searchParams.get('startDate') || undefined,
     endDate: searchParams.get('endDate') || undefined,
@@ -110,6 +110,11 @@ const CampaignDetailsPage: React.FC = () => {
   // Hierarchy edit modal state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedTierField, setSelectedTierField] = useState<string | null>(null);
+
+  // Status update state
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
 
   // Sync filters to URL
   useEffect(() => {
@@ -140,8 +145,8 @@ const CampaignDetailsPage: React.FC = () => {
       case 'custom':
         if (filters.startDate && filters.endDate) {
           return {
-            startHour: Math.floor(new Date(filters.startDate).getTime() / 1000 / 3600),
-            endHour: Math.floor(new Date(filters.endDate).getTime() / 1000 / 3600),
+            startDate: filters.startDate,
+            endDate: filters.endDate,
             groupBy: filters.groupBy,
           };
         }
@@ -152,8 +157,8 @@ const CampaignDetailsPage: React.FC = () => {
     }
 
     return {
-      startHour: Math.floor(startDate.getTime() / 1000 / 3600),
-      endHour: Math.floor(now.getTime() / 1000 / 3600),
+      startDate: startDate.toISOString().split('T')[0], // Convert to YYYY-MM-DD format
+      endDate: now.toISOString().split('T')[0], // Convert to YYYY-MM-DD format
       groupBy: filters.groupBy,
     };
   }, [filters]);
@@ -301,6 +306,27 @@ const CampaignDetailsPage: React.FC = () => {
     }
   }, [campaignId, refetchCampaign]);
 
+  // Status update handler
+  const handleStatusUpdate = useCallback(async (newStatus: 'live' | 'paused' | 'unknown') => {
+    if (!campaignId) return;
+
+    setIsUpdatingStatus(true);
+    setStatusUpdateError(null);
+    setIsStatusDropdownOpen(false);
+
+    try {
+      await dataWarehouseApi.campaigns.updateCampaignStatus(campaignId, { status: newStatus });
+
+      // Refresh campaign data to show updated status
+      await refetchCampaign();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update campaign status';
+      setStatusUpdateError(errorMessage);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  }, [campaignId, refetchCampaign]);
+
 
   // Loading and error states
   if (campaignLoading) {
@@ -366,30 +392,243 @@ const CampaignDetailsPage: React.FC = () => {
           <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Campaign Details</span>
         </div>
 
+        {/* Campaign Hierarchy */}
+        {campaign.hierarchy && (
+          <div className="mb-6 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold" style={{ color: 'var(--card-foreground)' }}>Campaign Hierarchy</h3>
+              <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                <span>Confidence:</span>
+                <span className={`px-2 py-1 rounded font-medium ${
+                  campaign.hierarchy.mapping_confidence >= 0.9 ? 'bg-green-100 text-green-800' :
+                  campaign.hierarchy.mapping_confidence >= 0.7 ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-red-100 text-red-800'
+                }`}>
+                  {(campaign.hierarchy.mapping_confidence * 100).toFixed(0)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Network */}
+              <button
+                onClick={() => handleTierCardClick('network')}
+                className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  1. Network
+                </label>
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const getNetworkColor = (network: string): { bg: string; text: string } => {
+                      const colors: Record<string, { bg: string; text: string }> = {
+                        'Facebook': { bg: '#1877F2', text: '#ffffff' },
+                        'Instagram': { bg: '#E4405F', text: '#ffffff' },
+                        'Google': { bg: '#4285F4', text: '#ffffff' },
+                        'TikTok': { bg: '#000000', text: '#ffffff' },
+                        'LinkedIn': { bg: '#0A66C2', text: '#ffffff' },
+                        'Twitter': { bg: '#1DA1F2', text: '#ffffff' },
+                        'Pinterest': { bg: '#E60023', text: '#ffffff' },
+                        'Snapchat': { bg: '#FFFC00', text: '#000000' },
+                        'YouTube': { bg: '#FF0000', text: '#ffffff' },
+                        'Reddit': { bg: '#FF4500', text: '#ffffff' },
+                        'Unknown': { bg: '#6B7280', text: '#ffffff' },
+                      };
+                      return colors[network] || colors['Unknown'];
+                    };
+                    const { bg, text } = getNetworkColor(campaign.hierarchy!.network);
+                    return (
+                      <span
+                        className="px-3 py-1.5 text-sm font-medium rounded"
+                        style={{ backgroundColor: bg, color: text }}
+                      >
+                        {campaign.hierarchy!.network}
+                      </span>
+                    );
+                  })()}
+                  <Edit3 className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--muted-foreground)' }} />
+                </div>
+                <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                  Advertising platform or vendor
+                </p>
+              </button>
+
+              {/* Domain */}
+              <button
+                onClick={() => handleTierCardClick('domain')}
+                className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  2. Domain
+                </label>
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                  {campaign.hierarchy.domain}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Campaign category or type
+                </p>
+              </button>
+
+              {/* Placement */}
+              <button
+                onClick={() => handleTierCardClick('placement')}
+                className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  3. Placement
+                </label>
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                  {campaign.hierarchy.placement}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Ad placement format
+                </p>
+              </button>
+
+              {/* Targeting */}
+              <button
+                onClick={() => handleTierCardClick('targeting')}
+                className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  4. Targeting
+                </label>
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                  {campaign.hierarchy.targeting}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Target audience segment
+                </p>
+              </button>
+
+              {/* Special */}
+              <button
+                onClick={() => handleTierCardClick('special')}
+                className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+              >
+                <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                  5. Special
+                </label>
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
+                  {campaign.hierarchy.special}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Special classification
+                </p>
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+              <div className="flex items-center justify-between text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                <span>
+                  Last updated: {new Date(campaign.hierarchy.updated_at).toLocaleString()}
+                </span>
+                <span>
+                  Campaign ID: {campaign.hierarchy.campaign_id}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Campaign Header */}
         <div className="rounded-lg p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold" style={{ color: 'var(--foreground)' }}>{campaign.name}</h1>
-                <div className="flex items-center gap-2">
-                  {campaign.is_serving ? (
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-green-100 text-green-800 rounded-full">
+
+                {/* Editable Status Badge */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                    disabled={isUpdatingStatus}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      backgroundColor: campaign.status === 'live' ? '#10b981' : campaign.status === 'paused' ? '#6b7280' : '#9ca3af',
+                      color: '#ffffff'
+                    }}
+                  >
+                    {isUpdatingStatus ? (
+                      <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : campaign.status === 'live' ? (
                       <Zap className="h-3 w-3" />
-                      <span className="text-xs font-medium">Live</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-100 text-gray-600 rounded-full">
+                    ) : campaign.status === 'paused' ? (
                       <ZapOff className="h-3 w-3" />
-                      <span className="text-xs font-medium">Paused</span>
-                    </div>
+                    ) : (
+                      <AlertCircle className="h-3 w-3" />
+                    )}
+                    <span>
+                      {campaign.status === 'live' ? 'Live' : campaign.status === 'paused' ? 'Paused' : 'Unknown'}
+                    </span>
+                  </button>
+
+                  {/* Status Dropdown Menu */}
+                  {isStatusDropdownOpen && !isUpdatingStatus && (
+                    <>
+                      {/* Backdrop to close dropdown */}
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setIsStatusDropdownOpen(false)}
+                      />
+
+                      {/* Dropdown Menu */}
+                      <div
+                        className="absolute top-full mt-2 left-0 rounded-lg shadow-lg z-20 overflow-hidden"
+                        style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', minWidth: '150px' }}
+                      >
+                        <button
+                          onClick={() => handleStatusUpdate('live')}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-green-50 transition-colors flex items-center gap-2"
+                          style={{ color: 'var(--foreground)' }}
+                        >
+                          <Zap className="h-4 w-4 text-green-600" />
+                          <span>Live</span>
+                        </button>
+                        <button
+                          onClick={() => handleStatusUpdate('paused')}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+                          style={{ color: 'var(--foreground)' }}
+                        >
+                          <ZapOff className="h-4 w-4 text-gray-600" />
+                          <span>Paused</span>
+                        </button>
+                        <button
+                          onClick={() => handleStatusUpdate('unknown')}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+                          style={{ color: 'var(--foreground)' }}
+                        >
+                          <AlertCircle className="h-4 w-4 text-gray-400" />
+                          <span>Unknown</span>
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
 
-
+              {/* Status Update Error */}
+              {statusUpdateError && (
+                <div className="mt-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50" style={{ border: '1px solid #fecaca' }}>
+                  <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-red-800">Failed to update status</p>
+                    <p className="text-xs text-red-700">{statusUpdateError}</p>
+                  </div>
+                  <button
+                    onClick={() => setStatusUpdateError(null)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
-
           </div>
         </div>
       </div>
@@ -656,150 +895,6 @@ const CampaignDetailsPage: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Campaign Hierarchy */}
-      {campaign.hierarchy && (
-        <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold" style={{ color: 'var(--card-foreground)' }}>Campaign Hierarchy</h3>
-            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              <span>Confidence:</span>
-              <span className={`px-2 py-1 rounded font-medium ${
-                campaign.hierarchy.mapping_confidence >= 0.9 ? 'bg-green-100 text-green-800' :
-                campaign.hierarchy.mapping_confidence >= 0.7 ? 'bg-yellow-100 text-yellow-800' :
-                'bg-red-100 text-red-800'
-              }`}>
-                {(campaign.hierarchy.mapping_confidence * 100).toFixed(0)}%
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Network */}
-            <button
-              onClick={() => handleTierCardClick('network')}
-              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-            >
-              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                1. Network
-              </label>
-              <div className="flex items-center gap-2">
-                {(() => {
-                  const getNetworkColor = (network: string): { bg: string; text: string } => {
-                    const colors: Record<string, { bg: string; text: string }> = {
-                      'Facebook': { bg: '#1877F2', text: '#ffffff' },
-                      'Instagram': { bg: '#E4405F', text: '#ffffff' },
-                      'Google': { bg: '#4285F4', text: '#ffffff' },
-                      'TikTok': { bg: '#000000', text: '#ffffff' },
-                      'LinkedIn': { bg: '#0A66C2', text: '#ffffff' },
-                      'Twitter': { bg: '#1DA1F2', text: '#ffffff' },
-                      'Pinterest': { bg: '#E60023', text: '#ffffff' },
-                      'Snapchat': { bg: '#FFFC00', text: '#000000' },
-                      'YouTube': { bg: '#FF0000', text: '#ffffff' },
-                      'Reddit': { bg: '#FF4500', text: '#ffffff' },
-                      'Unknown': { bg: '#6B7280', text: '#ffffff' },
-                    };
-                    return colors[network] || colors['Unknown'];
-                  };
-                  const { bg, text } = getNetworkColor(campaign.hierarchy!.network);
-                  return (
-                    <span
-                      className="px-3 py-1.5 text-sm font-medium rounded"
-                      style={{ backgroundColor: bg, color: text }}
-                    >
-                      {campaign.hierarchy!.network}
-                    </span>
-                  );
-                })()}
-                <Edit3 className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--muted-foreground)' }} />
-              </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
-                Advertising platform or vendor
-              </p>
-            </button>
-
-            {/* Domain */}
-            <button
-              onClick={() => handleTierCardClick('domain')}
-              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-            >
-              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                2. Domain
-              </label>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
-                {campaign.hierarchy.domain}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Campaign category or type
-              </p>
-            </button>
-
-            {/* Placement */}
-            <button
-              onClick={() => handleTierCardClick('placement')}
-              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-            >
-              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                3. Placement
-              </label>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
-                {campaign.hierarchy.placement}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Ad placement format
-              </p>
-            </button>
-
-            {/* Targeting */}
-            <button
-              onClick={() => handleTierCardClick('targeting')}
-              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-            >
-              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                4. Targeting
-              </label>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
-                {campaign.hierarchy.targeting}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Target audience segment
-              </p>
-            </button>
-
-            {/* Special */}
-            <button
-              onClick={() => handleTierCardClick('special')}
-              className="rounded-lg p-4 text-left hover:shadow-md transition-all cursor-pointer"
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-            >
-              <label className="block text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                5. Special
-              </label>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--foreground)' }}>
-                {campaign.hierarchy.special}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Special classification
-              </p>
-            </button>
-          </div>
-
-          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              <span>
-                Last updated: {new Date(campaign.hierarchy.updated_at).toLocaleString()}
-              </span>
-              <span>
-                Campaign ID: {campaign.hierarchy.campaign_id}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Activity Log */}
       <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
