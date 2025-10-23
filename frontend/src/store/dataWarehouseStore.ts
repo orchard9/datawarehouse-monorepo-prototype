@@ -98,7 +98,7 @@ const initialState: DataWarehouseState = {
     dateRange: 'last30days',
     startDate: undefined,
     endDate: undefined,
-    sortBy: 'sessions',
+    sortBy: 'cost',
     sortDir: 'desc',
     page: 1,
     limit: 10,
@@ -386,13 +386,17 @@ export const useDataWarehouseStore = create<DataWarehouseStore>()(
           set({ dashboardFilters: filters });
           // Automatically trigger campaign refetch when filters change
           const state = get();
+
+          // Client-side sortable columns that can't be sorted by database
+          const clientSideColumns = ['cost', 'raw_clicks', 'unique_clicks', 'cpc_raw', 'cpc_unique',
+                                      'raw_reg', 'cpr_raw', 'cpr_confirm', 'cps', 'revenue', 'rps', 'ltrev', 'roas'];
+
           const campaignQuery: CampaignQuery = {
-            page: filters.page,
-            limit: filters.limit,
+            // No page/limit - fetch all campaigns for client-side operations
+            limit: 1000,
             search: filters.search || undefined,
             isServing: filters.status === 'all' ? undefined : filters.status === 'live',
-            orderBy: filters.sortBy as 'created_at' | 'updated_at' | 'name' | 'sessions' | 'registrations',
-            orderDirection: filters.sortDir,
+            // No orderBy needed - all sorting happens client-side
             includeMetrics: true,
             includeHierarchy: true,
             startDate: filters.startDate,
@@ -421,7 +425,7 @@ export const useDataWarehouseStore = create<DataWarehouseStore>()(
             dateRange: 'last30days',
             startDate: undefined,
             endDate: undefined,
-            sortBy: 'sessions',
+            sortBy: 'cost',
             sortDir: 'desc',
             page: 1,
             limit: 10,

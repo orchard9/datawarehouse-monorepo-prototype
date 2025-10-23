@@ -27,6 +27,7 @@ import {
 } from '../types/index.js';
 import { ErrorUtils, NotFoundError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
+import { daysBetween, calculateOverlapDays, prorateCostForPeriod } from '../utils/dateUtils.js';
 
 /**
  * Campaign-related data warehouse operations
@@ -41,7 +42,7 @@ export class DataWarehouseCampaignService {
     try {
       const {
         page = 1,
-        limit = 20,
+        limit = 1000,
         status,
         isServing,
         hasData,
@@ -56,7 +57,7 @@ export class DataWarehouseCampaignService {
         endDate
       } = query;
 
-      ErrorUtils.validateRequest(limit <= 100, 'Limit cannot exceed 100');
+      ErrorUtils.validateRequest(limit <= 1000, 'Limit cannot exceed 1000');
       ErrorUtils.validateRequest(page >= 1, 'Page must be >= 1');
 
       const offset = (page - 1) * limit;
@@ -181,7 +182,17 @@ export class DataWarehouseCampaignService {
       // Get campaigns with metrics
       const sql = `
         SELECT
-          c.*,
+          c.id, c.name, c.description, c.tracking_url, c.is_serving, c.serving_url, c.traffic_weight,
+          c.deleted_at, c.created_at, c.updated_at, c.slug, c.path, c.status, c.sync_timestamp,
+          COALESCE(cco.cost, c.cost) as cost,
+          COALESCE(cco.cost_status, c.cost_status, 'estimated') as cost_status,
+          cco.override_reason as cost_override_reason,
+          cco.overridden_by as cost_overridden_by,
+          cco.overridden_at as cost_overridden_at,
+          cco.start_date as cost_start_date,
+          cco.end_date as cost_end_date,
+          cco.billing_period as cost_billing_period,
+          CASE WHEN cco.id IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
           COALESCE(cho.network, ch.network) as network,
           COALESCE(cho.domain, ch.domain) as domain,
           COALESCE(cho.placement, ch.placement) as placement,
@@ -211,13 +222,15 @@ export class DataWarehouseCampaignService {
           COALESCE(SUM(hd.media), 0) as total_media,
           COALESCE(SUM(hd.terms_acceptances), 0) as total_terms_acceptances,
           COUNT(hd.unix_hour) as data_point_count,
+          MIN(datetime(hd.unix_hour * 3600, 'unixepoch')) as first_activity_date,
           MAX(datetime(hd.unix_hour * 3600, 'unixepoch')) as last_activity_date
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
         LEFT JOIN campaign_hierarchy_overrides cho ON c.id = cho.campaign_id AND cho.is_active = 1
+        LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id AND cco.is_active = 1
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         ${mainQueryWhereClause}
-        GROUP BY c.id, ch.id
+        GROUP BY c.id, ch.id, cco.id
         ${orderClause}
         LIMIT ? OFFSET ?
       `;
@@ -226,6 +239,57 @@ export class DataWarehouseCampaignService {
 
       // Transform to typed response with metrics calculation
       const campaignsWithMetrics: DataWarehouseCampaignWithMetrics[] = campaigns.map(row => {
+        // Calculate prorated cost if date filtering is active
+        let calculatedCost = row.cost || 0;
+
+        if (startDate && endDate && row.cost_start_date && row.cost_end_date) {
+          // PRIORITY 1: Use explicit cost override dates if they exist
+          const queryStartDate = new Date(startDate);
+          const queryEndDate = new Date(endDate);
+          const costStartDate = new Date(row.cost_start_date);
+          const costEndDate = new Date(row.cost_end_date);
+
+          // Calculate overlap days between query range and cost period
+          const overlapDays = calculateOverlapDays(
+            costStartDate, costEndDate,
+            queryStartDate, queryEndDate
+          );
+
+          if (overlapDays > 0) {
+            // Calculate total days in the cost period
+            const periodDays = daysBetween(costStartDate, costEndDate);
+
+            // Prorate the cost based on overlap
+            calculatedCost = prorateCostForPeriod(row.cost || 0, periodDays, overlapDays);
+          } else {
+            // No overlap means zero cost for this date range
+            calculatedCost = 0;
+          }
+        } else if (startDate && endDate && calculatedCost > 0 && row.first_activity_date && row.last_activity_date) {
+          // FALLBACK: Prorate base costs using campaign activity dates
+          const queryStartDate = new Date(startDate);
+          const queryEndDate = new Date(endDate);
+          const activityStartDate = new Date(row.first_activity_date);
+          const activityEndDate = new Date(row.last_activity_date);
+
+          // Calculate overlap days between query range and activity period
+          const overlapDays = calculateOverlapDays(
+            activityStartDate, activityEndDate,
+            queryStartDate, queryEndDate
+          );
+
+          if (overlapDays > 0) {
+            // Calculate total days in the activity period
+            const activityDays = daysBetween(activityStartDate, activityEndDate);
+
+            // Prorate the cost based on overlap with activity range
+            calculatedCost = prorateCostForPeriod(row.cost || 0, activityDays, overlapDays);
+          } else {
+            // No overlap with activity range means zero cost for this date range
+            calculatedCost = 0;
+          }
+        }
+
         const campaign: DataWarehouseCampaign = {
           id: row.id,
           name: row.name,
@@ -239,8 +303,9 @@ export class DataWarehouseCampaignService {
           updated_at: row.updated_at,
           slug: row.slug,
           path: row.path,
-          cost: row.cost || 0,
-          status: row.status || 'unknown',
+          cost: calculatedCost,
+          cost_status: row.cost_status || 'estimated',
+          status: row.status || (row.is_serving ? 'live' : 'paused'),
           sync_timestamp: row.sync_timestamp
         };
 
@@ -347,7 +412,17 @@ export class DataWarehouseCampaignService {
 
       const sql = `
         SELECT
-          c.*,
+          c.id, c.name, c.description, c.tracking_url, c.is_serving, c.serving_url, c.traffic_weight,
+          c.deleted_at, c.created_at, c.updated_at, c.slug, c.path, c.status, c.sync_timestamp,
+          COALESCE(cco.cost, c.cost) as cost,
+          COALESCE(cco.cost_status, c.cost_status, 'estimated') as cost_status,
+          cco.override_reason as cost_override_reason,
+          cco.overridden_by as cost_overridden_by,
+          cco.overridden_at as cost_overridden_at,
+          cco.start_date as cost_start_date,
+          cco.end_date as cost_end_date,
+          cco.billing_period as cost_billing_period,
+          CASE WHEN cco.id IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
           ch.id as hierarchy_id,
           COALESCE(cho.network, ch.network) as network,
           COALESCE(cho.domain, ch.domain) as domain,
@@ -386,9 +461,10 @@ export class DataWarehouseCampaignService {
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
         LEFT JOIN campaign_hierarchy_overrides cho ON c.id = cho.campaign_id AND cho.is_active = 1
+        LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id AND cco.is_active = 1
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         WHERE c.id = ?
-        GROUP BY c.id, ch.id
+        GROUP BY c.id, ch.id, cco.id
       `;
 
       const dbResult = db.executeQuerySingle<any>(sql, [id]);
@@ -408,7 +484,8 @@ export class DataWarehouseCampaignService {
         slug: dbResult.slug,
         path: dbResult.path,
         cost: dbResult.cost || 0,
-        status: dbResult.status || 'unknown',
+        cost_status: dbResult.cost_status || 'estimated',
+        status: dbResult.status || (dbResult.is_serving ? 'live' : 'paused'),
         sync_timestamp: dbResult.sync_timestamp
       };
 
@@ -695,62 +772,391 @@ conn.close()
   }
 
   /**
-   * Update campaign cost
+   * Update campaign cost (creates override that persists across syncs)
    */
-  static async updateCampaignCost(campaignId: number, cost: number): Promise<DataWarehouseCampaign> {
+  static async updateCampaignCost(
+    campaignId: number,
+    cost: number,
+    cost_status: 'confirmed' | 'api_sourced' = 'confirmed',
+    start_date: string,
+    end_date: string,
+    billing_period: string = 'custom',
+    overridden_by: string,
+    override_reason?: string
+  ): Promise<DataWarehouseCampaign> {
     const db = getDataWarehouseDatabase();
 
     try {
       ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
       ErrorUtils.validateRequest(!isNaN(cost) && cost >= 0, 'Cost must be a non-negative number');
+      ErrorUtils.validateRequest(overridden_by && overridden_by.length > 0, 'overridden_by is required');
+      ErrorUtils.validateRequest(
+        ['confirmed', 'api_sourced'].includes(cost_status),
+        'cost_status must be either "confirmed" or "api_sourced"'
+      );
+      ErrorUtils.validateRequest(start_date && start_date.length > 0, 'start_date is required');
+      ErrorUtils.validateRequest(end_date && end_date.length > 0, 'end_date is required');
+      ErrorUtils.validateRequest(
+        new Date(end_date) >= new Date(start_date),
+        'end_date must be greater than or equal to start_date'
+      );
 
       // Verify campaign exists first
       await this.getCampaignById(campaignId);
 
-      // Update cost
-      const updateSql = `
-        UPDATE campaigns
-        SET cost = ?,
+      // Deactivate any existing active override for this campaign
+      const deactivateSql = `
+        UPDATE campaign_cost_overrides
+        SET is_active = 0,
             updated_at = datetime('now')
-        WHERE id = ?
+        WHERE campaign_id = ? AND is_active = 1
       `;
+      db.executeWriteOperation(deactivateSql, [campaignId]);
 
-      db.executeQuery(updateSql, [cost, campaignId]);
-
-      // Get updated campaign
-      const updatedCampaign = await this.getCampaignById(campaignId);
-
-      logger.info('Updated campaign cost', {
+      // Insert new cost override
+      const insertSql = `
+        INSERT INTO campaign_cost_overrides (
+          campaign_id,
+          cost,
+          cost_status,
+          start_date,
+          end_date,
+          billing_period,
+          override_reason,
+          overridden_by,
+          overridden_at,
+          is_active,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1, datetime('now'), datetime('now'))
+      `;
+      db.executeWriteOperation(insertSql, [
         campaignId,
         cost,
+        cost_status,
+        start_date,
+        end_date,
+        billing_period,
+        override_reason || null,
+        overridden_by
+      ]);
+
+      // Get updated campaign (COALESCE in getCampaignById will return override value)
+      const updatedCampaign = await this.getCampaignById(campaignId);
+
+      logger.info('Created campaign cost override', {
+        campaignId,
+        cost,
+        cost_status,
+        start_date,
+        end_date,
+        billing_period,
+        overridden_by,
         name: updatedCampaign.name
       });
 
-      return {
-        id: updatedCampaign.id,
-        name: updatedCampaign.name,
-        description: updatedCampaign.description,
-        tracking_url: updatedCampaign.tracking_url,
-        is_serving: updatedCampaign.is_serving,
-        serving_url: updatedCampaign.serving_url,
-        traffic_weight: updatedCampaign.traffic_weight,
-        deleted_at: updatedCampaign.deleted_at,
-        created_at: updatedCampaign.created_at,
-        updated_at: updatedCampaign.updated_at,
-        slug: updatedCampaign.slug,
-        path: updatedCampaign.path,
-        cost: cost,
-        status: updatedCampaign.status,
-        sync_timestamp: updatedCampaign.sync_timestamp
-      };
+      // Log activity
+      const costFormatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cost);
+      this.logCampaignActivity(
+        campaignId,
+        'cost_update',
+        `Updated cost to ${costFormatted} (${cost_status === 'confirmed' ? 'Confirmed' : 'API Sourced'})`,
+        {
+          cost,
+          cost_status,
+          start_date,
+          end_date,
+          billing_period,
+          reason: override_reason,
+          campaign_name: updatedCampaign.name
+        },
+        overridden_by,
+        'web_ui'
+      );
+
+      return updatedCampaign;
 
     } catch (error) {
-      logger.error('Failed to update campaign cost', {
+      logger.error('Failed to create campaign cost override', {
         campaignId,
         cost,
+        cost_status,
+        overridden_by,
         error: error instanceof Error ? error.message : String(error)
       });
       ErrorUtils.handleDatabaseError(error, 'updateCampaignCost');
+      throw error;
+    }
+  }
+
+  /**
+   * Delete (deactivate) campaign cost override
+   */
+  static async deleteCostOverride(campaignId: number, overridden_by: string): Promise<{ success: boolean }> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(overridden_by && overridden_by.length > 0, 'overridden_by is required');
+
+      // Verify campaign exists first
+      await this.getCampaignById(campaignId);
+
+      // Deactivate active cost override
+      const deactivateSql = `
+        UPDATE campaign_cost_overrides
+        SET is_active = 0,
+            updated_at = datetime('now')
+        WHERE campaign_id = ? AND is_active = 1
+      `;
+      db.executeWriteOperation(deactivateSql, [campaignId]);
+
+      const success = true;
+
+      logger.info('Deleted cost override', {
+        campaignId,
+        overridden_by,
+        success
+      });
+
+      // Log activity
+      const campaign = await this.getCampaignById(campaignId);
+      this.logCampaignActivity(
+        campaignId,
+        'cost_delete',
+        `Removed cost override`,
+        {
+          campaign_name: campaign.name
+        },
+        overridden_by,
+        'web_ui'
+      );
+
+      return { success };
+
+    } catch (error) {
+      logger.error('Failed to delete cost override', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'deleteCostOverride');
+      throw error;
+    }
+  }
+
+  /**
+   * Get cost override history for a campaign
+   */
+  static async getCostOverrideHistory(campaignId: number, limit: number = 10): Promise<any[]> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+
+      // Get cost override history
+      const sql = `
+        SELECT
+          id,
+          campaign_id,
+          cost,
+          cost_status,
+          override_reason,
+          overridden_by,
+          overridden_at,
+          is_active,
+          created_at,
+          updated_at
+        FROM campaign_cost_overrides
+        WHERE campaign_id = ?
+        ORDER BY overridden_at DESC
+        LIMIT ?
+      `;
+
+      const rows = db.getRecords(sql, [campaignId, limit]);
+
+      logger.info('Retrieved cost override history', {
+        campaignId,
+        historyCount: rows.length
+      });
+
+      return rows.map(row => ({
+        id: row.id,
+        campaign_id: row.campaign_id,
+        cost: row.cost,
+        cost_status: row.cost_status,
+        override_reason: row.override_reason,
+        overridden_by: row.overridden_by,
+        overridden_at: row.overridden_at,
+        is_active: Boolean(row.is_active),
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      }));
+
+    } catch (error) {
+      logger.error('Failed to get cost override history', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'getCostOverrideHistory');
+      throw error;
+    }
+  }
+
+  /**
+   * Get campaign cost for a specific date range with proration
+   * Calculates cost based on overlapping billing periods and fills gaps with estimated cost
+   */
+  static async getCampaignCostForDateRange(
+    campaignId: number,
+    startDate: string,
+    endDate: string
+  ): Promise<{
+    total_cost: number;
+    breakdown: Array<{
+      start_date: string;
+      end_date: string;
+      cost: number;
+      daily_rate: number;
+      days: number;
+      cost_status: string;
+      billing_period?: string;
+      override_id?: number;
+    }>;
+  }> {
+    const db = getDataWarehouseDatabase();
+    const { parseDate, daysBetween, calculateOverlapDays, prorateCostForPeriod } = await import('../utils/dateUtils.js');
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(startDate && endDate, 'Start date and end date are required');
+
+      const queryStart = parseDate(startDate);
+      const queryEnd = parseDate(endDate);
+      const queryDays = daysBetween(queryStart, queryEnd);
+
+      // Get campaign data for estimated cost
+      const campaign = await this.getCampaignById(campaignId);
+      const estimatedTotalCost = campaign.cost || 0;
+
+      // Get all cost overrides that overlap with the query date range
+      const overrideSql = `
+        SELECT
+          id,
+          cost,
+          cost_status,
+          start_date,
+          end_date,
+          billing_period
+        FROM campaign_cost_overrides
+        WHERE campaign_id = ?
+          AND is_active = 1
+          AND date(end_date) >= date(?)
+          AND date(start_date) <= date(?)
+        ORDER BY start_date ASC
+      `;
+
+      const overrides = db.getRecords(overrideSql, [campaignId, startDate, endDate]);
+
+      const breakdown: Array<{
+        start_date: string;
+        end_date: string;
+        cost: number;
+        daily_rate: number;
+        days: number;
+        cost_status: string;
+        billing_period?: string;
+        override_id?: number;
+      }> = [];
+
+      let totalCost = 0;
+      let coveredDays = 0;
+
+      // Process each overlapping cost override
+      for (const override of overrides) {
+        const periodStart = parseDate(override.start_date);
+        const periodEnd = parseDate(override.end_date);
+        const periodDays = daysBetween(periodStart, periodEnd);
+        const overlapDays = calculateOverlapDays(periodStart, periodEnd, queryStart, queryEnd);
+
+        if (overlapDays > 0) {
+          const proratedCost = prorateCostForPeriod(override.cost, periodDays, overlapDays);
+          const dailyRate = override.cost / periodDays;
+
+          // Determine actual overlap start/end within query range
+          const overlapStart = periodStart > queryStart ? periodStart : queryStart;
+          const overlapEnd = periodEnd < queryEnd ? periodEnd : queryEnd;
+
+          breakdown.push({
+            start_date: overlapStart.toISOString().split('T')[0],
+            end_date: overlapEnd.toISOString().split('T')[0],
+            cost: proratedCost,
+            daily_rate: dailyRate,
+            days: overlapDays,
+            cost_status: override.cost_status,
+            billing_period: override.billing_period,
+            override_id: override.id,
+          });
+
+          totalCost += proratedCost;
+          coveredDays += overlapDays;
+        }
+      }
+
+      // For days not covered by overrides, use estimated cost (proportionally allocated)
+      const uncoveredDays = queryDays - coveredDays;
+      if (uncoveredDays > 0 && estimatedTotalCost > 0) {
+        // Get total sessions for all time to calculate daily estimated rate
+        const sessionSql = `
+          SELECT COALESCE(SUM(sessions), 0) as total_sessions
+          FROM hourly_data
+          WHERE campaign_id = ?
+        `;
+        const sessionResult = db.getRecord(sessionSql, [campaignId]);
+        const totalSessions = sessionResult?.total_sessions || 0;
+
+        // Calculate estimated daily rate (assuming even distribution)
+        // If we have session data, use it; otherwise just divide cost by assumed 30 days
+        const estimatedDailyRate = totalSessions > 0
+          ? estimatedTotalCost / Math.max(totalSessions / 100, 30) // Rough estimate based on sessions
+          : estimatedTotalCost / 30; // Fallback to monthly rate
+
+        const estimatedCost = estimatedDailyRate * uncoveredDays;
+
+        breakdown.push({
+          start_date: startDate,
+          end_date: endDate,
+          cost: estimatedCost,
+          daily_rate: estimatedDailyRate,
+          days: uncoveredDays,
+          cost_status: 'estimated',
+        });
+
+        totalCost += estimatedCost;
+      }
+
+      logger.info('Calculated campaign cost for date range', {
+        campaignId,
+        startDate,
+        endDate,
+        queryDays,
+        coveredDays,
+        totalCost,
+        breakdownCount: breakdown.length,
+      });
+
+      return {
+        total_cost: totalCost,
+        breakdown,
+      };
+
+    } catch (error) {
+      logger.error('Failed to get campaign cost for date range', {
+        campaignId,
+        startDate,
+        endDate,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      ErrorUtils.handleDatabaseError(error, 'getCampaignCostForDateRange');
       throw error;
     }
   }
@@ -776,7 +1182,7 @@ conn.close()
         WHERE id = ?
       `;
 
-      db.executeQuery(updateSql, [status, campaignId]);
+      db.executeWriteOperation(updateSql, [status, campaignId]);
 
       // Get updated campaign
       const updatedCampaign = await this.getCampaignById(campaignId);
@@ -786,6 +1192,17 @@ conn.close()
         status,
         name: updatedCampaign.name
       });
+
+      // Log activity
+      const statusLabels = { live: 'Live', paused: 'Paused', unknown: 'Unknown' };
+      this.logCampaignActivity(
+        campaignId,
+        'status_change',
+        `Changed status to ${statusLabels[status]}`,
+        { status, campaign_name: updatedCampaign.name },
+        undefined,
+        'web_ui'
+      );
 
       return {
         id: updatedCampaign.id,
@@ -817,6 +1234,58 @@ conn.close()
   }
 
   /**
+   * Log campaign activity
+   * Records user actions and system changes to campaigns
+   */
+  static logCampaignActivity(
+    campaignId: number,
+    activityType: 'sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit',
+    description: string,
+    metadata?: Record<string, any>,
+    userId?: string,
+    source: 'etl' | 'web_ui' | 'api' | 'system' = 'web_ui'
+  ): void {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      const insertSql = `
+        INSERT INTO campaign_activity (
+          campaign_id,
+          activity_type,
+          description,
+          metadata,
+          user_id,
+          source,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      `;
+
+      db.executeWriteOperation(insertSql, [
+        campaignId,
+        activityType,
+        description,
+        metadata ? JSON.stringify(metadata) : null,
+        userId || null,
+        source
+      ]);
+
+      logger.debug('Campaign activity logged', {
+        campaignId,
+        activityType,
+        description,
+        source
+      });
+    } catch (error) {
+      // Log error but don't fail the main operation
+      logger.error('Failed to log campaign activity', {
+        campaignId,
+        activityType,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
    * Get campaign activity log
    */
   static async getCampaignActivity(campaignId: number, query: CampaignActivityQuery): Promise<PaginatedResponse<CampaignActivity>> {
@@ -831,57 +1300,44 @@ conn.close()
         limit = 50
       } = query;
 
-      ErrorUtils.validateRequest(limit <= 100, 'Limit cannot exceed 100');
+      ErrorUtils.validateRequest(limit <= 1000, 'Limit cannot exceed 1000');
       ErrorUtils.validateRequest(page >= 1, 'Page must be >= 1');
 
       const offset = (page - 1) * limit;
 
-      // Since we don't have an actual activity log table yet, we'll simulate it with sync history
-      // This provides a working implementation that can be enhanced later
+      // Query campaign-specific activity from campaign_activity table
       const activitySql = `
         SELECT
           id,
-          '${campaignId}' as campaign_id,
-          CASE
-            WHEN sync_type = 'campaigns' THEN 'sync'
-            WHEN sync_type = 'metrics' THEN 'data_received'
-            ELSE 'sync'
-          END as activity_type,
-          CASE
-            WHEN status = 'completed' THEN 'Successfully synced campaign data'
-            WHEN status = 'failed' THEN 'Failed to sync campaign data: ' || COALESCE(error_message, 'Unknown error')
-            WHEN status = 'running' THEN 'Sync in progress'
-            ELSE 'Unknown activity'
-          END as description,
-          json_object(
-            'sync_type', sync_type,
-            'records_processed', records_processed,
-            'records_inserted', records_inserted,
-            'records_updated', records_updated,
-            'api_calls_made', api_calls_made
-          ) as metadata,
-          start_time as created_at,
-          null as user_id,
-          'etl' as source
-        FROM sync_history
-        ORDER BY start_time DESC
+          campaign_id,
+          activity_type,
+          description,
+          metadata,
+          created_at,
+          user_id,
+          source
+        FROM campaign_activity
+        WHERE campaign_id = ?
+        ORDER BY created_at DESC
         LIMIT ? OFFSET ?
       `;
 
-      // Get total count (simplified for demo)
+      // Get total count for this campaign
       const countSql = `
-        SELECT COUNT(*) as count FROM sync_history
+        SELECT COUNT(*) as count
+        FROM campaign_activity
+        WHERE campaign_id = ?
       `;
-      const countResult = db.executeQuerySingle<{ count: number }>(countSql);
+      const countResult = db.executeQuerySingle<{ count: number }>(countSql, [campaignId]);
       const total = countResult?.count || 0;
 
       // Get activities
-      const activities = db.executeQuery<any>(activitySql, [limit, offset]);
+      const activities = db.executeQuery<any>(activitySql, [campaignId, limit, offset]);
 
       // Transform to match CampaignActivity interface
       const transformedActivities: CampaignActivity[] = activities.map(row => ({
         id: row.id,
-        campaign_id: parseInt(row.campaign_id),
+        campaign_id: row.campaign_id,
         activity_type: row.activity_type,
         description: row.description,
         metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
@@ -2096,6 +2552,23 @@ export class DataWarehouseHierarchyOverrideService {
       // Verify campaign exists
       const campaign = await DataWarehouseCampaignService.getCampaignById(campaignId);
 
+      // Get existing override (if any) before deactivating to preserve unchanged fields
+      const existingOverrideSql = `
+        SELECT network, domain, placement, targeting, special
+        FROM campaign_hierarchy_overrides
+        WHERE campaign_id = ? AND is_active = 1
+      `;
+      const existingOverride = db.executeQuerySingle<any>(existingOverrideSql, [campaignId]);
+
+      // Merge new values with existing override values (preserve unchanged fields)
+      const mergedOverride = {
+        network: overrideData.network !== undefined ? overrideData.network : (existingOverride?.network || null),
+        domain: overrideData.domain !== undefined ? overrideData.domain : (existingOverride?.domain || null),
+        placement: overrideData.placement !== undefined ? overrideData.placement : (existingOverride?.placement || null),
+        targeting: overrideData.targeting !== undefined ? overrideData.targeting : (existingOverride?.targeting || null),
+        special: overrideData.special !== undefined ? overrideData.special : (existingOverride?.special || null),
+      };
+
       // Deactivate existing override if any
       const deactivateSql = `
         UPDATE campaign_hierarchy_overrides
@@ -2104,7 +2577,7 @@ export class DataWarehouseHierarchyOverrideService {
       `;
       db.executeWriteOperation(deactivateSql, [campaignId]);
 
-      // Insert new override
+      // Insert new override with merged values
       const insertSql = `
         INSERT INTO campaign_hierarchy_overrides (
           campaign_id, network, domain, placement, targeting, special,
@@ -2114,11 +2587,11 @@ export class DataWarehouseHierarchyOverrideService {
 
       db.executeWriteOperation(insertSql, [
         campaignId,
-        overrideData.network || null,
-        overrideData.domain || null,
-        overrideData.placement || null,
-        overrideData.targeting || null,
-        overrideData.special || null,
+        mergedOverride.network,
+        mergedOverride.domain,
+        mergedOverride.placement,
+        mergedOverride.targeting,
+        mergedOverride.special,
         overrideData.override_reason || null,
         overrideData.overridden_by
       ]);
@@ -2171,6 +2644,28 @@ export class DataWarehouseHierarchyOverrideService {
         overriddenBy: overrideData.overridden_by,
         fields: Object.keys(overrideData).filter(k => k !== 'overridden_by' && overrideData[k as keyof typeof overrideData])
       });
+
+      // Log activity
+      const changedFields = Object.keys(overrideData)
+        .filter(k => k !== 'overridden_by' && k !== 'override_reason' && overrideData[k as keyof typeof overrideData])
+        .map(k => k.charAt(0).toUpperCase() + k.slice(1))
+        .join(', ');
+
+      DataWarehouseCampaignService.logCampaignActivity(
+        campaignId,
+        'hierarchy_update',
+        `Updated hierarchy: ${changedFields || 'No fields changed'}`,
+        {
+          network: overrideData.network,
+          domain: overrideData.domain,
+          placement: overrideData.placement,
+          targeting: overrideData.targeting,
+          special: overrideData.special,
+          reason: overrideData.override_reason
+        },
+        overrideData.overridden_by,
+        'web_ui'
+      );
 
       return {
         success: true,

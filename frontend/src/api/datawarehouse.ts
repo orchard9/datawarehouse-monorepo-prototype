@@ -109,17 +109,17 @@ export const campaignApi = {
   /**
    * Get campaign activity log
    */
-  async getActivity(id: number, limit = 20) {
-    return api.get<{
-      campaign: Pick<Campaign, 'id' | 'name'>;
-      activity: Array<{
-        id: number;
-        timestamp: string;
-        type: 'sync' | 'hierarchy_update' | 'status_change' | 'metrics_update';
-        description: string;
-        details: Record<string, unknown>;
-      }>;
-    }>(`${BASE_PATH}/campaigns/${id}/activity`, { limit });
+  async getActivity(id: number, page = 1, limit = 20) {
+    return api.getPaginated<{
+      id: number;
+      campaign_id: number;
+      activity_type: 'sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit';
+      description: string;
+      metadata?: Record<string, unknown>;
+      created_at: string;
+      user_id?: string;
+      source: 'system' | 'web_ui' | 'api' | 'etl';
+    }>(`${BASE_PATH}/campaigns/${id}/activity`, { page, limit });
   },
 
   /**
@@ -169,18 +169,64 @@ export const campaignApi = {
   },
 
   /**
-   * Update campaign cost
+   * Update campaign cost (with date range)
    */
   async updateCampaignCost(
     id: number,
     data: {
       cost: number;
+      cost_status?: 'confirmed' | 'api_sourced';
+      start_date: string;
+      end_date: string;
+      billing_period?: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+      override_reason?: string;
+      overridden_by: string;
     }
   ) {
     return api.patch<{
       success: boolean;
       campaign: Campaign;
     }>(`${BASE_PATH}/campaigns/${id}/cost`, data);
+  },
+
+  /**
+   * Get campaign cost breakdown for a date range
+   */
+  async getCostBreakdown(
+    id: number,
+    startDate: string,
+    endDate: string
+  ) {
+    return api.get<{
+      total_cost: number;
+      breakdown: Array<{
+        start_date: string;
+        end_date: string;
+        cost: number;
+        daily_rate: number;
+        days: number;
+        cost_status: string;
+        billing_period?: string;
+        override_id?: number;
+      }>;
+    }>(`${BASE_PATH}/campaigns/${id}/cost/breakdown`, {
+      startDate,
+      endDate,
+    });
+  },
+
+  /**
+   * Delete campaign cost override
+   */
+  async deleteCostOverride(
+    id: number,
+    data: {
+      overridden_by: string;
+    }
+  ) {
+    return api.delete<{
+      success: boolean;
+    }>(`${BASE_PATH}/campaigns/${id}/cost/override`, data);
   },
 };
 

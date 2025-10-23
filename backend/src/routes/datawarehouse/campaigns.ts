@@ -15,7 +15,7 @@ const router = Router();
 // Validation schemas
 const CampaignQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
   status: z.string().optional(),
   isServing: z.string().optional().transform(val => val === undefined ? undefined : val === 'true'),
   hasData: z.string().optional().transform(val => val === undefined ? undefined : val === 'true'),
@@ -75,8 +75,22 @@ const HierarchyHistoryQuerySchema = z.object({
 });
 
 const CampaignCostUpdateSchema = z.object({
-  cost: z.number().min(0, 'Cost must be a non-negative number')
-});
+  cost: z.number().min(0, 'Cost must be a non-negative number'),
+  cost_status: z.enum(['confirmed', 'api_sourced'], {
+    errorMap: () => ({ message: 'Cost status must be one of: confirmed, api_sourced' })
+  }).optional().default('confirmed'),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Start date must be in YYYY-MM-DD format'),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'End date must be in YYYY-MM-DD format'),
+  billing_period: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'custom']).optional().default('custom'),
+  override_reason: z.string().min(1).max(500).optional(),
+  overridden_by: z.string().min(1).max(255)
+}).refine(
+  (data) => new Date(data.end_date) >= new Date(data.start_date),
+  {
+    message: "End date must be greater than or equal to start date",
+    path: ["end_date"]
+  }
+);
 
 const CampaignStatusUpdateSchema = z.object({
   status: z.enum(['live', 'paused', 'unknown'], {
@@ -370,22 +384,136 @@ router.get('/:id/activity', validateCampaignId, validateActivityQuery, ErrorUtil
 
 /**
  * PATCH /api/datawarehouse/campaigns/:id/cost
- * Update campaign cost
+ * Update campaign cost (creates override that persists across syncs)
  */
 router.patch('/:id/cost', validateCampaignId, validateCampaignCostUpdate, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
   const campaignId = parseInt(req.params.id as string);
-  const { cost } = (req as any).validatedBody;
+  const { cost, cost_status, start_date, end_date, billing_period, override_reason, overridden_by } = (req as any).validatedBody;
 
   logger.info('Updating campaign cost', {
     campaignId,
     cost,
+    cost_status,
+    start_date,
+    end_date,
+    billing_period,
+    overridden_by,
     ip: req.ip,
     userAgent: req.get('User-Agent')
   });
 
-  const updatedCampaign = await DataWarehouseCampaignService.updateCampaignCost(campaignId, cost);
+  const updatedCampaign = await DataWarehouseCampaignService.updateCampaignCost(
+    campaignId,
+    cost,
+    cost_status || 'confirmed',
+    start_date,
+    end_date,
+    billing_period || 'custom',
+    overridden_by,
+    override_reason
+  );
 
   res.success(updatedCampaign, 'Campaign cost updated successfully');
+}));
+
+/**
+ * DELETE /api/datawarehouse/campaigns/:id/cost/override
+ * Delete (deactivate) campaign cost override
+ */
+router.delete('/:id/cost/override', validateCampaignId, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const overridden_by = req.body.overridden_by || 'system';
+
+  logger.info('Deleting campaign cost override', {
+    campaignId,
+    overridden_by,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseCampaignService.deleteCostOverride(campaignId, overridden_by);
+
+  res.success(result, 'Campaign cost override deleted successfully');
+}));
+
+/**
+ * GET /api/datawarehouse/campaigns/:id/cost/breakdown
+ * Get detailed cost breakdown for a campaign within a date range
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
+ */
+router.get('/:id/cost/breakdown', validateCampaignId, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const { startDate, endDate } = req.query;
+
+  // Validate required query parameters
+  ErrorUtils.validateRequest(
+    startDate && typeof startDate === 'string',
+    'startDate query parameter is required (format: YYYY-MM-DD)'
+  );
+  ErrorUtils.validateRequest(
+    endDate && typeof endDate === 'string',
+    'endDate query parameter is required (format: YYYY-MM-DD)'
+  );
+
+  // Validate date format
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  ErrorUtils.validateRequest(
+    dateRegex.test(startDate as string),
+    'startDate must be in YYYY-MM-DD format'
+  );
+  ErrorUtils.validateRequest(
+    dateRegex.test(endDate as string),
+    'endDate must be in YYYY-MM-DD format'
+  );
+
+  // Validate date range
+  ErrorUtils.validateRequest(
+    new Date(endDate as string) >= new Date(startDate as string),
+    'endDate must be greater than or equal to startDate'
+  );
+
+  logger.info('Fetching campaign cost breakdown', {
+    campaignId,
+    startDate,
+    endDate,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const breakdown = await DataWarehouseCampaignService.getCampaignCostForDateRange(
+    campaignId,
+    startDate as string,
+    endDate as string
+  );
+
+  logger.info('Retrieved cost breakdown', {
+    campaignId,
+    totalCost: breakdown.total_cost,
+    periodsCount: breakdown.breakdown.length,
+    dateRange: `${startDate} to ${endDate}`
+  });
+
+  res.success(breakdown, 'Cost breakdown retrieved successfully');
+}));
+
+/**
+ * GET /api/datawarehouse/campaigns/:id/cost/history
+ * Get campaign cost override history
+ */
+router.get('/:id/cost/history', validateCampaignId, validateHierarchyHistoryQuery, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const limit = (req as any).validatedQuery?.limit || 10;
+
+  logger.info('Retrieving campaign cost override history', {
+    campaignId,
+    limit,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const history = await DataWarehouseCampaignService.getCostOverrideHistory(campaignId, limit);
+
+  res.success({ history, total: history.length }, 'Campaign cost override history retrieved successfully');
 }));
 
 /**

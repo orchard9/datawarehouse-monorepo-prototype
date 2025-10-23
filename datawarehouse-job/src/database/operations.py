@@ -23,30 +23,66 @@ class DatabaseOperations:
     
     # Campaign operations
     def upsert_campaign(self, campaign_data: Dict[str, Any]) -> int:
-        """Insert or update campaign data"""
+        """Insert or update campaign data, preserving cost fields during sync"""
         cursor = self.conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO campaigns 
-            (id, name, description, tracking_url, is_serving, serving_url, traffic_weight,
-             deleted_at, created_at, updated_at, slug, path, sync_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            campaign_data['id'],
-            campaign_data['name'], 
-            campaign_data.get('description'),
-            campaign_data.get('tracking_url'),
-            campaign_data.get('is_serving', False),
-            campaign_data.get('serving_url'),
-            campaign_data.get('traffic_weight', 0),
-            campaign_data.get('deleted_at'),
-            campaign_data.get('created_at'),
-            campaign_data.get('updated_at'),
-            campaign_data.get('slug'),
-            campaign_data.get('path'),
-            datetime.now(timezone.utc).isoformat()
-        ))
-        
+
+        # Check if campaign exists
+        cursor.execute("SELECT id, cost, cost_status FROM campaigns WHERE id = ?", (campaign_data['id'],))
+        existing = cursor.fetchone()
+
+        if existing:
+            # Campaign exists - UPDATE only API fields, preserve cost and cost_status
+            cursor.execute("""
+                UPDATE campaigns
+                SET name = ?,
+                    description = ?,
+                    tracking_url = ?,
+                    is_serving = ?,
+                    serving_url = ?,
+                    traffic_weight = ?,
+                    deleted_at = ?,
+                    updated_at = ?,
+                    slug = ?,
+                    path = ?,
+                    sync_timestamp = ?
+                WHERE id = ?
+            """, (
+                campaign_data['name'],
+                campaign_data.get('description'),
+                campaign_data.get('tracking_url'),
+                campaign_data.get('is_serving', False),
+                campaign_data.get('serving_url'),
+                campaign_data.get('traffic_weight', 0),
+                campaign_data.get('deleted_at'),
+                campaign_data.get('updated_at'),
+                campaign_data.get('slug'),
+                campaign_data.get('path'),
+                datetime.now(timezone.utc).isoformat(),
+                campaign_data['id']
+            ))
+        else:
+            # New campaign - INSERT with default cost and status values
+            cursor.execute("""
+                INSERT INTO campaigns
+                (id, name, description, tracking_url, is_serving, serving_url, traffic_weight,
+                 deleted_at, created_at, updated_at, slug, path, status, cost, cost_status, sync_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', NULL, 'estimated', ?)
+            """, (
+                campaign_data['id'],
+                campaign_data['name'],
+                campaign_data.get('description'),
+                campaign_data.get('tracking_url'),
+                campaign_data.get('is_serving', False),
+                campaign_data.get('serving_url'),
+                campaign_data.get('traffic_weight', 0),
+                campaign_data.get('deleted_at'),
+                campaign_data.get('created_at'),
+                campaign_data.get('updated_at'),
+                campaign_data.get('slug'),
+                campaign_data.get('path'),
+                datetime.now(timezone.utc).isoformat()
+            ))
+
         self.conn.commit()
         return campaign_data['id']
     

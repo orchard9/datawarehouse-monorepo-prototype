@@ -147,20 +147,12 @@ const MarketingDashboard: React.FC = () => {
 
   // Build query from filters
   const query = useMemo<CampaignQuery>(() => {
-    // Client-side sortable columns should not be sent to backend
-    const clientSideColumns = ['cost', 'raw_clicks', 'unique_clicks', 'cpc_raw', 'cpc_unique',
-                                'raw_reg', 'cpr_raw', 'cpr_confirm', 'cps', 'revenue', 'rps', 'ltrev', 'roas'];
-
     const baseQuery: CampaignQuery = {
-      page: filters.page,
-      limit: filters.limit,
+      // Fetch all campaigns for client-side operations
+      limit: 1000,
       includeMetrics: true,
       includeHierarchy: true,
-      // Only send orderBy to backend if it's not a client-side column
-      ...(clientSideColumns.includes(filters.sortBy) ? {} : {
-        orderBy: filters.sortBy as 'created_at' | 'updated_at' | 'name' | 'sessions' | 'registrations' | 'traffic_weight',
-        orderDirection: filters.sortDir,
-      })
+      // No orderBy - all sorting happens client-side
     };
 
     if (filters.search) {
@@ -172,7 +164,10 @@ const MarketingDashboard: React.FC = () => {
     }
 
     // Date range handling
-    if (filters.dateRange !== 'custom') {
+    if (filters.dateRange === 'alltime') {
+      // No date filtering - show all time data
+      // Don't set startDate or endDate
+    } else if (filters.dateRange !== 'custom') {
       const now = new Date();
       let startDate: Date;
 
@@ -212,10 +207,6 @@ const MarketingDashboard: React.FC = () => {
 
     return baseQuery;
   }, [
-    filters.page,
-    filters.limit,
-    filters.sortBy,
-    filters.sortDir,
     filters.search,
     filters.status,
     filters.dateRange,
@@ -285,7 +276,7 @@ const MarketingDashboard: React.FC = () => {
     };
   }, [campaigns]);
 
-  // Apply client-side filtering and sorting
+  // Apply client-side filtering and sorting (ALL operations now client-side)
   const filteredAndSortedCampaigns = useMemo(() => {
     // First, apply network filtering (client-side)
     let filtered = campaigns;
@@ -296,15 +287,7 @@ const MarketingDashboard: React.FC = () => {
       });
     }
 
-    // Then apply client-side sorting for calculated columns
-    const clientSideColumns = ['cost', 'raw_clicks', 'unique_clicks', 'cpc_raw', 'cpc_unique',
-                                'raw_reg', 'cpr_raw', 'cpr_confirm', 'cps', 'revenue', 'rps', 'ltrev', 'roas'];
-
-    if (!clientSideColumns.includes(filters.sortBy)) {
-      return filtered; // Backend handles sorting
-    }
-
-    // Client-side sorting for calculated fields
+    // Then apply client-side sorting for ALL columns
     return [...filtered].sort((a, b) => {
       let aValue = 0;
       let bValue = 0;
@@ -315,6 +298,27 @@ const MarketingDashboard: React.FC = () => {
       const bRevenue = (b.metrics?.totalConvertedUsers || 0) * 25.50;
 
       switch (filters.sortBy) {
+        // String comparisons
+        case 'name':
+          return filters.sortDir === 'asc'
+            ? a.name.localeCompare(b.name)
+            : b.name.localeCompare(a.name);
+
+        // Numeric columns from database
+        case 'sessions':
+          aValue = a.metrics?.totalSessions || 0;
+          bValue = b.metrics?.totalSessions || 0;
+          break;
+        case 'registrations':
+          aValue = a.metrics?.totalRegistrations || 0;
+          bValue = b.metrics?.totalRegistrations || 0;
+          break;
+        case 'sales':
+          aValue = a.metrics?.totalConvertedUsers || 0;
+          bValue = b.metrics?.totalConvertedUsers || 0;
+          break;
+
+        // Calculated columns
         case 'cost':
           aValue = aCost;
           bValue = bCost;
@@ -346,6 +350,7 @@ const MarketingDashboard: React.FC = () => {
           aValue = (a.metrics?.totalConvertedUsers || 0) > 0 ? aRevenue / (a.metrics?.totalConvertedUsers || 0) : 0;
           bValue = (b.metrics?.totalConvertedUsers || 0) > 0 ? bRevenue / (b.metrics?.totalConvertedUsers || 0) : 0;
           break;
+
         // Placeholder columns - no sorting (all zeros)
         default:
           aValue = 0;
@@ -355,6 +360,16 @@ const MarketingDashboard: React.FC = () => {
       return filters.sortDir === 'asc' ? aValue - bValue : bValue - aValue;
     });
   }, [campaigns, filters.sortBy, filters.sortDir, filters.vendors]);
+
+  // Client-side pagination - slice the sorted array for display
+  const paginatedCampaigns = useMemo(() => {
+    const startIndex = (filters.page - 1) * filters.limit;
+    const endIndex = startIndex + filters.limit;
+    return filteredAndSortedCampaigns.slice(startIndex, endIndex);
+  }, [filteredAndSortedCampaigns, filters.page, filters.limit]);
+
+  // Total count for pagination (all filtered campaigns, not just current page)
+  const totalCampaigns = filteredAndSortedCampaigns.length;
 
   // Prepare chart data from campaigns
   const chartData = useMemo<ChartData[]>(() => {
@@ -370,38 +385,17 @@ const MarketingDashboard: React.FC = () => {
     });
   }, [filteredAndSortedCampaigns]);
 
-  // Sort handler - backend only supports: name, created_at, updated_at, sync_timestamp, traffic_weight, sessions, registrations
+  // Sort handler - all sorting now happens client-side
   const handleSort = useCallback((column: string) => {
-    // For calculated/placeholder columns, sort locally (no backend call)
-    const clientSideColumns = ['cost', 'raw_clicks', 'unique_clicks', 'cpc_raw', 'cpc_unique',
-                                'raw_reg', 'cpr_raw', 'cpr_confirm', 'cps', 'revenue', 'rps', 'ltrev', 'roas'];
-
-    // Map frontend column names to backend-supported fields
-    const backendSortableColumns: Record<string, string> = {
-      'name': 'name',
-      'sessions': 'sessions',
-      'registrations': 'registrations',
-      'is_serving': 'traffic_weight', // Sort by traffic_weight as proxy for serving status
-      'sales': 'registrations', // Use registrations as fallback for sales (converted_users)
-    };
-
     if (filters.sortBy === column) {
+      // Toggle direction if same column
       updateFilter('sortDir', filters.sortDir === 'asc' ? 'desc' : 'asc');
     } else {
-      // For client-side columns, only update local state (no API call)
-      if (clientSideColumns.includes(column)) {
-        updateFilters({
-          sortBy: column,
-          sortDir: 'desc',
-        });
-      } else {
-        // For backend columns, use mapped field name
-        const sortByField = backendSortableColumns[column] || column;
-        updateFilters({
-          sortBy: sortByField,
-          sortDir: 'desc',
-        });
-      }
+      // Set new column with default desc direction
+      updateFilters({
+        sortBy: column,
+        sortDir: 'desc',
+      });
     }
   }, [filters.sortBy, filters.sortDir, updateFilter, updateFilters]);
 
@@ -416,6 +410,7 @@ const MarketingDashboard: React.FC = () => {
 
   // Date range options
   const dateRangeOptions: DateRangeOption[] = [
+    { value: 'alltime', label: 'All Time' },
     { value: 'today', label: 'Today' },
     { value: 'yesterday', label: 'Yesterday' },
     { value: 'last7days', label: 'Last 7 Days' },
@@ -432,8 +427,8 @@ const MarketingDashboard: React.FC = () => {
     { value: 'unknown', label: 'Unknown' },
   ];
 
-  // Calculate total pages
-  const totalPages = meta?.totalPages || 1;
+  // Calculate total pages (client-side based on filtered campaigns)
+  const totalPages = Math.ceil(totalCampaigns / filters.limit) || 1;
 
   // Generate page numbers to display
   const pageNumbers = useMemo(() => {
@@ -1182,7 +1177,7 @@ const MarketingDashboard: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredAndSortedCampaigns.map((campaign) => {
+                paginatedCampaigns.map((campaign) => {
                   const totalSessions = campaign.metrics?.totalSessions || 0;
                   const cost = campaign.cost || 0;
                   const totalConvertedUsers = campaign.metrics?.totalConvertedUsers || 0;
@@ -1304,16 +1299,16 @@ const MarketingDashboard: React.FC = () => {
                 <option value={100}>100</option>
               </select>
               <span className="ml-2">
-                entries | Showing {((filters.page - 1) * filters.limit) + 1} to {Math.min(filters.page * filters.limit, meta.total)} of {meta.total} results
+                entries | Showing {((filters.page - 1) * filters.limit) + 1} to {Math.min(filters.page * filters.limit, totalCampaigns)} of {totalCampaigns} results
               </span>
             </div>
 
-            {meta.totalPages > 1 && (
+            {totalPages > 1 && (
               <div className="flex items-center space-x-2">
               {/* Previous button */}
               <button
                 onClick={() => updateFilter('page', filters.page - 1)}
-                disabled={!meta.hasPrev}
+                disabled={filters.page <= 1}
                 className="px-3 py-1 text-sm rounded hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   backgroundColor: 'var(--background)',
@@ -1350,7 +1345,7 @@ const MarketingDashboard: React.FC = () => {
               {/* Next button */}
               <button
                 onClick={() => updateFilter('page', filters.page + 1)}
-                disabled={!meta.hasNext}
+                disabled={filters.page >= totalPages}
                 className="px-3 py-1 text-sm rounded hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   backgroundColor: 'var(--background)',

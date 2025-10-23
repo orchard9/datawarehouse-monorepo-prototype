@@ -21,7 +21,7 @@ export function filtersToUrlParams(filters: DashboardFilters): URLSearchParams {
   if (filters.dateRange !== 'last30days') params.set('dateRange', filters.dateRange);
   if (filters.startDate) params.set('startDate', filters.startDate);
   if (filters.endDate) params.set('endDate', filters.endDate);
-  if (filters.sortBy !== 'sessions') params.set('sortBy', filters.sortBy);
+  if (filters.sortBy !== 'cost') params.set('sortBy', filters.sortBy);
   if (filters.sortDir !== 'desc') params.set('sortDir', filters.sortDir);
   if (filters.page > 1) params.set('page', String(filters.page));
   if (filters.limit !== 10) params.set('limit', String(filters.limit));
@@ -40,7 +40,7 @@ export function urlParamsToFilters(searchParams: URLSearchParams): DashboardFilt
     dateRange: searchParams.get('dateRange') || 'last30days',
     startDate: searchParams.get('startDate') || undefined,
     endDate: searchParams.get('endDate') || undefined,
-    sortBy: searchParams.get('sortBy') || 'sessions',
+    sortBy: searchParams.get('sortBy') || 'cost',
     sortDir: (searchParams.get('sortDir') as 'asc' | 'desc') || 'desc',
     page: Math.max(1, parseInt(searchParams.get('page') || '1')),
     limit: Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '10'))),
@@ -147,7 +147,7 @@ export function useDashboardFilters() {
       dateRange: 'last30days',
       startDate: undefined,
       endDate: undefined,
-      sortBy: 'sessions',
+      sortBy: 'cost',
       sortDir: 'desc',
       page: 1,
       limit: 10,

@@ -29,6 +29,9 @@ class DatabaseSchema:
                 updated_at TEXT NOT NULL,
                 slug TEXT,
                 path TEXT,
+                status TEXT DEFAULT 'unknown',
+                cost REAL DEFAULT NULL,
+                cost_status TEXT DEFAULT 'estimated',
                 sync_timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(id)
             )
@@ -141,6 +144,28 @@ class DatabaseSchema:
             )
         """)
 
+        # Campaign cost overrides table - manual cost entries that persist across syncs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_cost_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                cost REAL NOT NULL,
+                cost_status TEXT NOT NULL CHECK(cost_status IN ('estimated', 'confirmed', 'api_sourced')) DEFAULT 'confirmed',
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                billing_period TEXT DEFAULT 'custom' CHECK(billing_period IN ('daily', 'weekly', 'monthly', 'quarterly', 'custom')),
+                override_reason TEXT,
+                overridden_by TEXT NOT NULL,
+                overridden_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns (id),
+                CHECK(end_date >= start_date),
+                UNIQUE(campaign_id, is_active) ON CONFLICT REPLACE
+            )
+        """)
+
         # Sync history table - track ETL runs and data lineage
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_history (
@@ -180,6 +205,8 @@ class DatabaseSchema:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_campaign ON campaign_hierarchy (campaign_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_network ON campaign_hierarchy (network)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hierarchy_overrides_campaign ON campaign_hierarchy_overrides (campaign_id, is_active)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cost_overrides_campaign ON campaign_cost_overrides (campaign_id, is_active)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cost_overrides_dates ON campaign_cost_overrides (campaign_id, start_date, end_date, is_active)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_rules_priority ON hierarchy_rules (priority DESC, is_active)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_history_type_time ON sync_history (sync_type, start_time)")
         

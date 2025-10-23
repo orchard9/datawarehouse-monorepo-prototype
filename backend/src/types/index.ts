@@ -542,14 +542,14 @@ export interface DataWarehouseHealthCheck {
 export interface CampaignActivity {
   id: number;
   campaign_id: number;
-  activity_type: 'created' | 'updated' | 'paused' | 'resumed' | 'deleted' | 'sync' | 'data_received' | 'hierarchy_mapped';
+  activity_type: 'sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit';
   description: string;
   metadata?: {
     [key: string]: any;
   };
   created_at: string;
   user_id?: string;
-  source: 'system' | 'user' | 'api' | 'etl';
+  source: 'system' | 'web_ui' | 'api' | 'etl';
 }
 
 export interface CampaignActivityQuery extends PaginationQuery {

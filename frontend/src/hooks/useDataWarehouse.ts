@@ -192,10 +192,10 @@ export function useCampaignHierarchy(campaignId: number | null) {
   };
 }
 
-export function useCampaignActivity(campaignId: number | null, limit = 20) {
+export function useCampaignActivity(campaignId: number | null, page = 1, limit = 20) {
   const { data, loading, error, execute } = useApiCall(
-    () => campaignId ? dataWarehouseApi.campaigns.getActivity(campaignId, limit) : Promise.resolve(null),
-    [campaignId, limit]
+    () => campaignId ? dataWarehouseApi.campaigns.getActivity(campaignId, page, limit) : Promise.resolve(null),
+    [campaignId, page, limit]
   );
 
   useEffect(() => {
@@ -205,7 +205,8 @@ export function useCampaignActivity(campaignId: number | null, limit = 20) {
   }, [campaignId, execute]);
 
   return {
-    activity: data?.activity || [],
+    activity: data?.data || [],
+    meta: data?.meta || null,
     loading,
     error,
     refetch: execute

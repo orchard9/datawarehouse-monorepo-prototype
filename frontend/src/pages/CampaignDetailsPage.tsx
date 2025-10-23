@@ -39,10 +39,11 @@ import {
 } from 'recharts';
 import { useCampaign, useCampaignMetrics, useCampaignActivity } from '@/hooks/useDataWarehouse';
 import { HierarchyEditModal } from '@/components/HierarchyEditModal';
+import { CostEditModal } from '@/components/CostEditModal';
 import { dataWarehouseApi } from '@/api/datawarehouse';
 
 interface TimeBreakdownFilters {
-  timeRange: 'last24h' | 'last7d' | 'last30d' | 'custom';
+  timeRange: 'alltime' | 'today' | 'yesterday' | 'last7days' | 'last14days' | 'last30days' | 'last90days' | 'custom';
   groupBy: 'hour' | 'day' | 'week';
   startDate?: string;
   endDate?: string;
@@ -63,14 +64,37 @@ interface KpiCardProps {
   color: string;
   change?: string;
   changeType?: 'positive' | 'negative' | 'neutral';
+  badge?: {
+    text: string;
+    variant: 'estimated' | 'confirmed' | 'api_sourced';
+  };
+  onClick?: () => void;
 }
 
 
-const KpiCard: React.FC<KpiCardProps> = ({ label, value, icon: Icon, color, change, changeType }) => (
-  <div className="rounded-lg p-6 transition-colors" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+const KpiCard: React.FC<KpiCardProps> = ({ label, value, icon: Icon, color, change, changeType, badge, onClick }) => (
+  <div
+    className={`rounded-lg p-6 transition-colors ${onClick ? 'cursor-pointer hover:shadow-md' : ''}`}
+    style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+    onClick={onClick}
+  >
     <div className="flex items-center justify-between mb-2">
-      <span className="text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
-      <Icon className="h-5 w-5" style={{ color }} />
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
+        {badge && (
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            badge.variant === 'estimated' ? 'bg-muted text-muted-foreground' :
+            badge.variant === 'confirmed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+            'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+          }`}>
+            {badge.text}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1">
+        <Icon className="h-5 w-5" style={{ color }} />
+        {onClick && <Edit3 className="h-4 w-4 opacity-50" style={{ color: 'var(--muted-foreground)' }} />}
+      </div>
     </div>
     <div className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>
       {typeof value === 'number' ? value.toLocaleString() : value}
@@ -101,7 +125,7 @@ const CampaignDetailsPage: React.FC = () => {
 
   // URL-synced filters
   const [filters, setFilters] = useState<TimeBreakdownFilters>(() => ({
-    timeRange: (searchParams.get('timeRange') as TimeBreakdownFilters['timeRange']) || 'last30d',
+    timeRange: (searchParams.get('timeRange') as TimeBreakdownFilters['timeRange']) || 'last30days',
     groupBy: (searchParams.get('groupBy') as TimeBreakdownFilters['groupBy']) || 'day',
     startDate: searchParams.get('startDate') || undefined,
     endDate: searchParams.get('endDate') || undefined,
@@ -111,15 +135,21 @@ const CampaignDetailsPage: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedTierField, setSelectedTierField] = useState<string | null>(null);
 
+  // Cost edit modal state
+  const [isCostModalOpen, setIsCostModalOpen] = useState(false);
+
   // Status update state
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
 
+  // Activity pagination
+  const [activityPage, setActivityPage] = useState(1);
+
   // Sync filters to URL
   useEffect(() => {
     const params = new URLSearchParams();
-    if (filters.timeRange !== 'last7d') params.set('timeRange', filters.timeRange);
+    if (filters.timeRange !== 'last30days') params.set('timeRange', filters.timeRange);
     if (filters.groupBy !== 'day') params.set('groupBy', filters.groupBy);
     if (filters.startDate) params.set('startDate', filters.startDate);
     if (filters.endDate) params.set('endDate', filters.endDate);
@@ -132,28 +162,48 @@ const CampaignDetailsPage: React.FC = () => {
     const now = new Date();
     let startDate: Date;
 
-    switch (filters.timeRange) {
-      case 'last24h':
-        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        break;
-      case 'last7d':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case 'last30d':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case 'custom':
-        if (filters.startDate && filters.endDate) {
-          return {
-            startDate: filters.startDate,
-            endDate: filters.endDate,
-            groupBy: filters.groupBy,
-          };
-        }
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    // Handle 'alltime' - no date filtering
+    if (filters.timeRange === 'alltime') {
+      return {
+        groupBy: filters.groupBy,
+      };
+    }
+
+    // Handle custom date range
+    if (filters.timeRange === 'custom') {
+      if (filters.startDate && filters.endDate) {
+        return {
+          startDate: filters.startDate,
+          endDate: filters.endDate,
+          groupBy: filters.groupBy,
+        };
+      }
+      // Fallback if custom is selected but no dates provided
+      startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    } else {
+      // Handle predefined date ranges
+      switch (filters.timeRange) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'yesterday':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+          break;
+        case 'last7days':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'last14days':
+          startDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+          break;
+        case 'last30days':
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case 'last90days':
+          startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          break;
+        default:
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }
     }
 
     return {
@@ -166,7 +216,7 @@ const CampaignDetailsPage: React.FC = () => {
   // Fetch campaign and metrics data
   const { campaign, loading: campaignLoading, error: campaignError, refetch: refetchCampaign } = useCampaign(campaignId);
   const { metrics, loading: metricsLoading } = useCampaignMetrics(campaignId, metricsQuery);
-  const { activity, loading: activityLoading } = useCampaignActivity(campaignId);
+  const { activity, meta: activityMeta, loading: activityLoading } = useCampaignActivity(campaignId, activityPage, 5);
 
   // Handle invalid campaign ID
   useEffect(() => {
@@ -235,7 +285,7 @@ const CampaignDetailsPage: React.FC = () => {
         registrationRate: 0,
         conversionRate: 0,
         totalRevenue: 0,
-        totalCost: 0,
+        totalCost: campaign?.cost || 0,
         roas: 0,
       };
     }
@@ -249,7 +299,7 @@ const CampaignDetailsPage: React.FC = () => {
     const registrationRate = totals.sessions > 0 ? (totals.registrations / totals.sessions) * 100 : 0;
     const conversionRate = totals.sessions > 0 ? (totals.conversions / totals.sessions) * 100 : 0;
     const totalRevenue = totals.conversions * 25.50; // Demo calculation
-    const totalCost = totals.sessions * 0.75; // Demo calculation
+    const totalCost = campaign?.cost || 0; // Use actual cost from campaign
     const roas = totalCost > 0 ? totalRevenue / totalCost : 0;
 
     return {
@@ -262,7 +312,7 @@ const CampaignDetailsPage: React.FC = () => {
       totalCost,
       roas,
     };
-  }, [metrics]);
+  }, [metrics, campaign]);
 
 
   // Update filter handlers
@@ -327,6 +377,40 @@ const CampaignDetailsPage: React.FC = () => {
     }
   }, [campaignId, refetchCampaign]);
 
+  // Cost update handlers
+  const handleSaveCost = useCallback(async (data: {
+    cost: number;
+    cost_status: 'confirmed' | 'api_sourced';
+    override_reason?: string;
+    overridden_by: string;
+  }) => {
+    if (!campaignId) return;
+
+    try {
+      // Call API to save cost override
+      await dataWarehouseApi.campaigns.updateCampaignCost(campaignId, data);
+
+      // Refresh campaign data to show updated cost
+      await refetchCampaign();
+    } catch (error) {
+      throw error;
+    }
+  }, [campaignId, refetchCampaign]);
+
+  const handleDeleteCost = useCallback(async () => {
+    if (!campaignId) return;
+
+    try {
+      // Call API to delete cost override
+      await dataWarehouseApi.campaigns.deleteCostOverride(campaignId, { overridden_by: 'user' });
+
+      // Refresh campaign data to show reverted cost
+      await refetchCampaign();
+    } catch (error) {
+      throw error;
+    }
+  }, [campaignId, refetchCampaign]);
+
 
   // Loading and error states
   if (campaignLoading) {
@@ -362,9 +446,13 @@ const CampaignDetailsPage: React.FC = () => {
   }
 
   const timeRangeOptions = [
-    { value: 'last24h', label: 'Last 24 Hours' },
-    { value: 'last7d', label: 'Last 7 Days' },
-    { value: 'last30d', label: 'Last 30 Days' },
+    { value: 'alltime', label: 'All Time' },
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'last7days', label: 'Last 7 Days' },
+    { value: 'last14days', label: 'Last 14 Days' },
+    { value: 'last30days', label: 'Last 30 Days' },
+    { value: 'last90days', label: 'Last 90 Days' },
     { value: 'custom', label: 'Custom Range' },
   ];
 
@@ -635,7 +723,7 @@ const CampaignDetailsPage: React.FC = () => {
 
 
       {/* Enhanced KPI Cards */}
-      <div id="metrics-section" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div id="metrics-section" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <KpiCard
           label="Total Sessions"
           value={aggregatedMetrics.totalSessions}
@@ -661,9 +749,21 @@ const CampaignDetailsPage: React.FC = () => {
           changeType="negative"
         />
         <KpiCard
+          label="Cost"
+          value={`$${aggregatedMetrics.totalCost.toFixed(2)}`}
+          icon={DollarSign}
+          color="#ec4899"
+          badge={campaign?.cost_status ? {
+            text: campaign.cost_status === 'estimated' ? 'Estimated' :
+                  campaign.cost_status === 'confirmed' ? 'Confirmed' : 'API',
+            variant: campaign.cost_status
+          } : undefined}
+          onClick={() => setIsCostModalOpen(true)}
+        />
+        <KpiCard
           label="ROAS"
           value={`${aggregatedMetrics.roas.toFixed(2)}x`}
-          icon={DollarSign}
+          icon={TrendingUp}
           color="#f59e0b"
           change="+5.7% from previous period"
           changeType="positive"
@@ -906,33 +1006,68 @@ const CampaignDetailsPage: React.FC = () => {
             <p style={{ color: 'var(--muted-foreground)' }}>Loading activity...</p>
           </div>
         ) : activity && activity.length > 0 ? (
-          <div className="space-y-4">
-            {activity.slice(0, 10).map((activityItem) => (
-              <div
-                key={activityItem.id}
-                className="flex items-start gap-3 p-4 rounded-lg"
-                style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
-              >
-                <div className="w-2 h-2 rounded-full mt-2 bg-blue-500" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{activityItem.description}</span>
-                    <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                      {new Date(activityItem.timestamp).toLocaleString()}
+          <>
+            <div className="space-y-4">
+              {activity.map((activityItem) => (
+                <div
+                  key={activityItem.id}
+                  className="flex items-start gap-3 p-4 rounded-lg"
+                  style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)' }}
+                >
+                  <div className="w-2 h-2 rounded-full mt-2 bg-blue-500" />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{activityItem.description}</span>
+                      <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        {new Date(activityItem.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      activityItem.activity_type === 'sync' ? 'bg-blue-100 text-blue-800' :
+                      activityItem.activity_type === 'hierarchy_update' ? 'bg-green-100 text-green-800' :
+                      activityItem.activity_type === 'status_change' ? 'bg-yellow-100 text-yellow-800' :
+                      activityItem.activity_type === 'cost_update' ? 'bg-purple-100 text-purple-800' :
+                      activityItem.activity_type === 'cost_delete' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {activityItem.activity_type.replace(/_/g, ' ')}
                     </span>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    activityItem.type === 'sync' ? 'bg-blue-100 text-blue-800' :
-                    activityItem.type === 'hierarchy_update' ? 'bg-green-100 text-green-800' :
-                    activityItem.type === 'status_change' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {activityItem.type.replace('_', ' ')}
-                  </span>
                 </div>
+              ))}
+            </div>
+
+            {/* Pagination Controls */}
+            {activityMeta && activityMeta.totalPages > 1 && (
+              <div className="flex items-center justify-between mt-6 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => setActivityPage(prev => Math.max(1, prev - 1))}
+                  disabled={!activityMeta.hasPrev}
+                  className="px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    backgroundColor: activityMeta.hasPrev ? 'var(--primary)' : 'var(--muted)',
+                    color: activityMeta.hasPrev ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                  }}
+                >
+                  Previous
+                </button>
+                <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  Page {activityMeta.page} of {activityMeta.totalPages} ({activityMeta.total} total)
+                </span>
+                <button
+                  onClick={() => setActivityPage(prev => Math.min(activityMeta.totalPages, prev + 1))}
+                  disabled={!activityMeta.hasNext}
+                  className="px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    backgroundColor: activityMeta.hasNext ? 'var(--primary)' : 'var(--muted)',
+                    color: activityMeta.hasNext ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                  }}
+                >
+                  Next
+                </button>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         ) : (
           <div className="text-center py-8">
             <p style={{ color: 'var(--muted-foreground)' }}>No recent activity found</p>
@@ -956,6 +1091,17 @@ const CampaignDetailsPage: React.FC = () => {
           onSave={handleSaveHierarchy}
         />
       )}
+
+      {/* Cost Edit Modal */}
+      <CostEditModal
+        isOpen={isCostModalOpen}
+        onClose={() => setIsCostModalOpen(false)}
+        campaignId={campaignId}
+        currentCost={campaign.cost || 0}
+        currentCostStatus={campaign.cost_status || 'estimated'}
+        onSave={handleSaveCost}
+        onDelete={campaign.cost_status !== 'estimated' ? handleDeleteCost : undefined}
+      />
     </div>
   );
 };
