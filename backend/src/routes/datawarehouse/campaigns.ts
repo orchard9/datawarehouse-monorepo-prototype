@@ -597,4 +597,62 @@ router.get('/:id/hierarchy/history', validateCampaignId, validateHierarchyHistor
   res.success(result, 'Campaign hierarchy override history retrieved successfully');
 }));
 
+/**
+ * PATCH /api/datawarehouse/campaigns/:id/manager
+ * Update campaign account manager
+ */
+router.patch('/:id/manager', validateCampaignId, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const { account_manager } = req.body;
+
+  // Validate input
+  ErrorUtils.validateRequest(
+    account_manager === null || account_manager === undefined || (typeof account_manager === 'string' && account_manager.length <= 255),
+    'account_manager must be a string with max 255 characters or null'
+  );
+
+  logger.info('Updating campaign account manager', {
+    campaignId,
+    account_manager: account_manager || 'None',
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseCampaignService.updateAccountManager(
+    campaignId,
+    account_manager || null
+  );
+
+  res.success(result, 'Campaign account manager updated successfully');
+}));
+
+/**
+ * PATCH /api/datawarehouse/campaigns/:id/contact-info
+ * Update campaign contact info and credentials
+ */
+router.patch('/:id/contact-info', validateCampaignId, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignId = parseInt(req.params.id as string);
+  const { contact_info_credentials } = req.body;
+
+  // Validate input
+  ErrorUtils.validateRequest(
+    contact_info_credentials === null || contact_info_credentials === undefined || typeof contact_info_credentials === 'string',
+    'contact_info_credentials must be a string or null'
+  );
+
+  logger.info('Updating campaign contact info', {
+    campaignId,
+    hasContactInfo: !!contact_info_credentials,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const result = await DataWarehouseCampaignService.updateContactInfo(
+    campaignId,
+    contact_info_credentials || null
+  );
+
+  res.success(result, 'Campaign contact information updated successfully');
+}));
+
 export default router;

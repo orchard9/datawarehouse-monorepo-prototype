@@ -1234,6 +1234,129 @@ conn.close()
   }
 
   /**
+   * Update campaign account manager
+   */
+  static async updateAccountManager(campaignId: number, accountManager: string | null): Promise<DataWarehouseCampaign> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(
+        accountManager === null || (typeof accountManager === 'string' && accountManager.length <= 255),
+        'account_manager must be a string with max 255 characters or null'
+      );
+
+      // Verify campaign exists first
+      await this.getCampaignById(campaignId);
+
+      // Update account manager
+      const updateSql = `
+        UPDATE campaigns
+        SET account_manager = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `;
+
+      db.executeWriteOperation(updateSql, [accountManager, campaignId]);
+
+      // Get updated campaign
+      const updatedCampaign = await this.getCampaignById(campaignId);
+
+      logger.info('Updated campaign account manager', {
+        campaignId,
+        account_manager: accountManager || 'None',
+        name: updatedCampaign.name
+      });
+
+      // Log activity
+      const description = accountManager
+        ? `Changed account manager to ${accountManager}`
+        : 'Removed account manager';
+
+      this.logCampaignActivity(
+        campaignId,
+        'manual_edit',
+        description,
+        { account_manager: accountManager, campaign_name: updatedCampaign.name },
+        undefined,
+        'web_ui'
+      );
+
+      return updatedCampaign;
+
+    } catch (error) {
+      logger.error('Failed to update campaign account manager', {
+        campaignId,
+        accountManager,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'updateAccountManager');
+      throw error;
+    }
+  }
+
+  /**
+   * Update campaign contact info and credentials
+   */
+  static async updateContactInfo(campaignId: number, contactInfo: string | null): Promise<DataWarehouseCampaign> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      ErrorUtils.validateRequest(!isNaN(campaignId) && campaignId > 0, 'Campaign ID must be a positive number');
+      ErrorUtils.validateRequest(
+        contactInfo === null || typeof contactInfo === 'string',
+        'contact_info_credentials must be a string or null'
+      );
+
+      // Verify campaign exists first
+      await this.getCampaignById(campaignId);
+
+      // Update contact info
+      const updateSql = `
+        UPDATE campaigns
+        SET contact_info_credentials = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `;
+
+      db.executeWriteOperation(updateSql, [contactInfo, campaignId]);
+
+      // Get updated campaign
+      const updatedCampaign = await this.getCampaignById(campaignId);
+
+      logger.info('Updated campaign contact info', {
+        campaignId,
+        hasContactInfo: !!contactInfo,
+        name: updatedCampaign.name
+      });
+
+      // Log activity
+      const description = contactInfo
+        ? 'Updated contact information and credentials'
+        : 'Removed contact information';
+
+      this.logCampaignActivity(
+        campaignId,
+        'manual_edit',
+        description,
+        { has_contact_info: !!contactInfo, campaign_name: updatedCampaign.name },
+        undefined,
+        'web_ui'
+      );
+
+      return updatedCampaign;
+
+    } catch (error) {
+      logger.error('Failed to update campaign contact info', {
+        campaignId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'updateContactInfo');
+      throw error;
+    }
+  }
+
+  /**
    * Log campaign activity
    * Records user actions and system changes to campaigns
    */
