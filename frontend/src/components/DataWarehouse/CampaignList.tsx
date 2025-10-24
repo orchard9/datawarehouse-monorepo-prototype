@@ -5,7 +5,8 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Search, Filter, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Filter, ChevronLeft, ChevronRight, X, Plus } from 'lucide-react';
 import { useCampaigns } from '@/hooks/useDataWarehouse';
 import { CampaignCard } from './CampaignCard';
 import type { Campaign, CampaignQuery } from '@/types/datawarehouse';
@@ -26,6 +27,7 @@ export const CampaignList: React.FC<CampaignListProps> = ({
   onCampaignSelect,
   selectedCampaignId,
 }) => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [localFilters, setLocalFilters] = useState<CampaignQuery>({
@@ -137,6 +139,15 @@ export const CampaignList: React.FC<CampaignListProps> = ({
 
           {/* Action buttons - minimal Nike-inspired design */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/campaigns/new')}
+              className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-3 transition-colors duration-150 inline-flex items-center gap-2 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              aria-label="Create new campaign"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              <span className="hidden sm:inline">New Campaign</span>
+            </button>
+
             <button
               onClick={() => setShowFilters(!showFilters)}
               className="btn-secondary inline-flex items-center gap-2"

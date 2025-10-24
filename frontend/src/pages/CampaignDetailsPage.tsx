@@ -40,6 +40,8 @@ import {
 import { useCampaign, useCampaignMetrics, useCampaignActivity } from '@/hooks/useDataWarehouse';
 import { HierarchyEditModal } from '@/components/HierarchyEditModal';
 import { CostEditModal } from '@/components/CostEditModal';
+import { AccountManagerSection } from '@/components/AccountManagerSection';
+import { CampaignInformationCard } from '@/components/CampaignInformationCard';
 import { dataWarehouseApi } from '@/api/datawarehouse';
 
 interface TimeBreakdownFilters {
@@ -138,8 +140,7 @@ const CampaignDetailsPage: React.FC = () => {
   // Cost edit modal state
   const [isCostModalOpen, setIsCostModalOpen] = useState(false);
 
-  // Status update state
-  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  // Status update state (used by CampaignInformationCard)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
 
@@ -362,7 +363,6 @@ const CampaignDetailsPage: React.FC = () => {
 
     setIsUpdatingStatus(true);
     setStatusUpdateError(null);
-    setIsStatusDropdownOpen(false);
 
     try {
       await dataWarehouseApi.campaigns.updateCampaignStatus(campaignId, { status: newStatus });
@@ -405,6 +405,32 @@ const CampaignDetailsPage: React.FC = () => {
       await dataWarehouseApi.campaigns.deleteCostOverride(campaignId, { overridden_by: 'user' });
 
       // Refresh campaign data to show reverted cost
+      await refetchCampaign();
+    } catch (error) {
+      throw error;
+    }
+  }, [campaignId, refetchCampaign]);
+
+  // Account manager update handler
+  const handleUpdateAccountManager = useCallback(async (manager: string | null) => {
+    if (!campaignId) return;
+
+    try {
+      await dataWarehouseApi.campaigns.updateAccountManager(campaignId, manager);
+      // Refresh campaign data to show updated manager
+      await refetchCampaign();
+    } catch (error) {
+      throw error;
+    }
+  }, [campaignId, refetchCampaign]);
+
+  // Contact info update handler
+  const handleUpdateContactInfo = useCallback(async (contactInfo: string | null) => {
+    if (!campaignId) return;
+
+    try {
+      await dataWarehouseApi.campaigns.updateContactInfo(campaignId, contactInfo);
+      // Refresh campaign data to show updated contact info
       await refetchCampaign();
     } catch (error) {
       throw error;
@@ -625,99 +651,28 @@ const CampaignDetailsPage: React.FC = () => {
         )}
 
         {/* Campaign Header */}
-        <div className="rounded-lg p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold" style={{ color: 'var(--foreground)' }}>{campaign.name}</h1>
+        <div className="rounded-lg p-6 mb-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+          <h1 className="text-3xl font-bold" style={{ color: 'var(--foreground)' }}>{campaign.name}</h1>
+        </div>
 
-                {/* Editable Status Badge */}
-                <div className="relative">
-                  <button
-                    onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
-                    disabled={isUpdatingStatus}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      backgroundColor: campaign.status === 'live' ? '#10b981' : campaign.status === 'paused' ? '#6b7280' : '#9ca3af',
-                      color: '#ffffff'
-                    }}
-                  >
-                    {isUpdatingStatus ? (
-                      <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : campaign.status === 'live' ? (
-                      <Zap className="h-3 w-3" />
-                    ) : campaign.status === 'paused' ? (
-                      <ZapOff className="h-3 w-3" />
-                    ) : (
-                      <AlertCircle className="h-3 w-3" />
-                    )}
-                    <span>
-                      {campaign.status === 'live' ? 'Live' : campaign.status === 'paused' ? 'Paused' : 'Unknown'}
-                    </span>
-                  </button>
+        {/* Account Manager Section */}
+        <AccountManagerSection
+          campaignId={campaignId}
+          accountManager={campaign.account_manager}
+          onUpdate={handleUpdateAccountManager}
+        />
 
-                  {/* Status Dropdown Menu */}
-                  {isStatusDropdownOpen && !isUpdatingStatus && (
-                    <>
-                      {/* Backdrop to close dropdown */}
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setIsStatusDropdownOpen(false)}
-                      />
-
-                      {/* Dropdown Menu */}
-                      <div
-                        className="absolute top-full mt-2 left-0 rounded-lg shadow-lg z-20 overflow-hidden"
-                        style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', minWidth: '150px' }}
-                      >
-                        <button
-                          onClick={() => handleStatusUpdate('live')}
-                          className="w-full px-4 py-2 text-left text-sm hover:bg-green-50 transition-colors flex items-center gap-2"
-                          style={{ color: 'var(--foreground)' }}
-                        >
-                          <Zap className="h-4 w-4 text-green-600" />
-                          <span>Live</span>
-                        </button>
-                        <button
-                          onClick={() => handleStatusUpdate('paused')}
-                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-                          style={{ color: 'var(--foreground)' }}
-                        >
-                          <ZapOff className="h-4 w-4 text-gray-600" />
-                          <span>Paused</span>
-                        </button>
-                        <button
-                          onClick={() => handleStatusUpdate('unknown')}
-                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-                          style={{ color: 'var(--foreground)' }}
-                        >
-                          <AlertCircle className="h-4 w-4 text-gray-400" />
-                          <span>Unknown</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Status Update Error */}
-              {statusUpdateError && (
-                <div className="mt-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50" style={{ border: '1px solid #fecaca' }}>
-                  <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-red-800">Failed to update status</p>
-                    <p className="text-xs text-red-700">{statusUpdateError}</p>
-                  </div>
-                  <button
-                    onClick={() => setStatusUpdateError(null)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Campaign Information Card */}
+        <div className="mt-6">
+          <CampaignInformationCard
+            campaignId={campaignId}
+            status={campaign.status}
+            contactInfo={campaign.contact_info_credentials}
+            onUpdateStatus={handleStatusUpdate}
+            onUpdateContactInfo={handleUpdateContactInfo}
+            isUpdatingStatus={isUpdatingStatus}
+            statusError={statusUpdateError}
+          />
         </div>
       </div>
 

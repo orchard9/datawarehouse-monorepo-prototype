@@ -98,6 +98,28 @@ const CampaignStatusUpdateSchema = z.object({
   })
 });
 
+const CreateCampaignSchema = z.object({
+  name: z.string().min(1, 'Campaign name is required').max(255, 'Campaign name must be max 255 characters'),
+  description: z.string().max(1000).optional(),
+  tracking_url: z.string().url('Tracking URL must be a valid URL').optional().or(z.literal('')),
+  status: z.enum(['live', 'paused', 'unknown'], {
+    errorMap: () => ({ message: 'Status must be one of: live, paused, unknown' })
+  }),
+  account_manager: z.string().max(255).optional().or(z.literal('')),
+  contact_info_credentials: z.string().optional().or(z.literal('')),
+  cost: z.number().min(0, 'Cost must be a positive number').optional(),
+  cost_status: z.enum(['estimated', 'confirmed']).optional(),
+  hierarchy: z.object({
+    network: z.string().min(1, 'Network is required').max(255),
+    domain: z.string().min(1, 'Domain is required').max(255),
+    placement: z.string().min(1, 'Placement is required').max(255),
+    targeting: z.string().min(1, 'Targeting is required').max(255),
+    special: z.string().min(1, 'Special is required').max(255)
+  }, {
+    errorMap: () => ({ message: 'All hierarchy fields (network, domain, placement, targeting, special) are required' })
+  })
+});
+
 // Validation middleware
 const validateCampaignQuery = (req: Request, res: Response, next: Function): void => {
   try {
@@ -274,6 +296,29 @@ const validateCampaignStatusUpdate = (req: Request, res: Response, next: Functio
   }
 };
 
+const validateCreateCampaign = (req: Request, res: Response, next: Function): void => {
+  try {
+    const validatedBody = CreateCampaignSchema.parse(req.body);
+    (req as any).validatedBody = validatedBody;
+    next();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const validationErrors = error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message,
+        value: (err as any).input ?? 'unknown'
+      }));
+
+      res.error('Validation failed', 400, {
+        code: 'VALIDATION_ERROR',
+        errors: validationErrors
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
 /**
  * GET /api/datawarehouse/campaigns
  * List all campaigns with optional filtering and pagination
@@ -294,6 +339,25 @@ router.get('/', validateCampaignQuery, ErrorUtils.catchAsync(async (req: Request
   } else {
     res.error('Failed to retrieve campaigns', 500, 'SERVICE_ERROR');
   }
+}));
+
+/**
+ * POST /api/datawarehouse/campaigns
+ * Create a new campaign manually
+ */
+router.post('/', validateCreateCampaign, ErrorUtils.catchAsync(async (req: Request, res: Response) => {
+  const campaignData = (req as any).validatedBody;
+
+  logger.info('Creating new manual campaign', {
+    name: campaignData.name,
+    status: campaignData.status,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
+
+  const createdCampaign = await DataWarehouseCampaignService.createCampaign(campaignData);
+
+  res.success(createdCampaign, 'Campaign created successfully', 201);
 }));
 
 /**

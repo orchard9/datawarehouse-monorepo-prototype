@@ -169,6 +169,49 @@ export const campaignApi = {
   },
 
   /**
+   * Update campaign account manager
+   */
+  async updateAccountManager(
+    id: number,
+    account_manager: string | null
+  ) {
+    return api.patch<Campaign>(`${BASE_PATH}/campaigns/${id}/manager`, { account_manager });
+  },
+
+  /**
+   * Update campaign contact info and credentials
+   */
+  async updateContactInfo(
+    id: number,
+    contact_info_credentials: string | null
+  ) {
+    return api.patch<Campaign>(`${BASE_PATH}/campaigns/${id}/contact-info`, { contact_info_credentials });
+  },
+
+  /**
+   * Create a new campaign manually
+   */
+  async create(data: {
+    name: string;
+    description?: string;
+    tracking_url?: string;
+    status: 'live' | 'paused' | 'unknown';
+    account_manager?: string;
+    contact_info_credentials?: string;
+    cost?: number;
+    cost_status?: 'estimated' | 'confirmed';
+    hierarchy: {
+      network: string;
+      domain: string;
+      placement: string;
+      targeting: string;
+      special: string;
+    };
+  }) {
+    return api.post<Campaign>(`${BASE_PATH}/campaigns`, data);
+  },
+
+  /**
    * Update campaign cost (with date range)
    */
   async updateCampaignCost(

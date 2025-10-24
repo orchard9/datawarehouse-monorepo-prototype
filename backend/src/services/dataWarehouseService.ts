@@ -1357,6 +1357,164 @@ conn.close()
   }
 
   /**
+   * Create a new campaign manually
+   * Generates ID in the 1000000+ range for manual campaigns
+   */
+  static async createCampaign(campaignData: {
+    name: string;
+    description?: string;
+    tracking_url?: string;
+    status: 'live' | 'paused' | 'unknown';
+    account_manager?: string;
+    contact_info_credentials?: string;
+    cost?: number;
+    cost_status?: 'estimated' | 'confirmed';
+    hierarchy: {
+      network: string;
+      domain: string;
+      placement: string;
+      targeting: string;
+      special: string;
+    };
+  }): Promise<DataWarehouseCampaign> {
+    const db = getDataWarehouseDatabase();
+
+    try {
+      // Validate required fields
+      ErrorUtils.validateRequest(
+        campaignData.name && campaignData.name.length > 0 && campaignData.name.length <= 255,
+        'Campaign name is required and must be max 255 characters'
+      );
+      ErrorUtils.validateRequest(
+        ['live', 'paused', 'unknown'].includes(campaignData.status),
+        'Status must be one of: live, paused, unknown'
+      );
+
+      // Validate hierarchy
+      ErrorUtils.validateRequest(
+        campaignData.hierarchy &&
+        campaignData.hierarchy.network &&
+        campaignData.hierarchy.domain &&
+        campaignData.hierarchy.placement &&
+        campaignData.hierarchy.targeting &&
+        campaignData.hierarchy.special,
+        'All hierarchy fields (network, domain, placement, targeting, special) are required'
+      );
+
+      // Validate cost if provided
+      if (campaignData.cost !== undefined && campaignData.cost !== null) {
+        ErrorUtils.validateRequest(
+          campaignData.cost >= 0,
+          'Cost must be a positive number'
+        );
+      }
+
+      // Generate campaign ID in the 1000000+ range
+      const getMaxIdSql = `
+        SELECT MAX(id) as max_id
+        FROM campaigns
+        WHERE source = 'manual'
+      `;
+      const result = db.executeQuerySingle<{ max_id: number | null }>(getMaxIdSql, []);
+      const nextId = result?.max_id ? result.max_id + 1 : 1000000;
+
+      logger.info('Creating new manual campaign', {
+        generatedId: nextId,
+        name: campaignData.name,
+        status: campaignData.status
+      });
+
+      // Insert campaign record
+      const now = new Date().toISOString();
+      const insertCampaignSql = `
+        INSERT INTO campaigns (
+          id,
+          name,
+          description,
+          tracking_url,
+          status,
+          account_manager,
+          contact_info_credentials,
+          cost,
+          cost_status,
+          source,
+          is_serving,
+          created_at,
+          updated_at,
+          sync_timestamp
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', 0, ?, ?, ?)
+      `;
+
+      db.executeWriteOperation(insertCampaignSql, [
+        nextId,
+        campaignData.name,
+        campaignData.description || null,
+        campaignData.tracking_url || null,
+        campaignData.status,
+        campaignData.account_manager || null,
+        campaignData.contact_info_credentials || null,
+        campaignData.cost || null,
+        campaignData.cost_status || 'estimated',
+        now,
+        now,
+        now
+      ]);
+
+      // Insert hierarchy record
+      const insertHierarchySql = `
+        INSERT INTO campaign_hierarchy (
+          campaign_id,
+          campaign_name,
+          network,
+          domain,
+          placement,
+          targeting,
+          special,
+          mapping_confidence,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1.0, datetime('now'), datetime('now'))
+      `;
+
+      db.executeWriteOperation(insertHierarchySql, [
+        nextId,
+        campaignData.name,
+        campaignData.hierarchy.network,
+        campaignData.hierarchy.domain,
+        campaignData.hierarchy.placement,
+        campaignData.hierarchy.targeting,
+        campaignData.hierarchy.special
+      ]);
+
+      // Log activity
+      this.logCampaignActivity(
+        nextId,
+        'manual_edit',
+        `Campaign created manually: ${campaignData.name}`,
+        {
+          name: campaignData.name,
+          status: campaignData.status,
+          hierarchy: campaignData.hierarchy,
+          created_by: 'manual'
+        },
+        undefined,
+        'web_ui'
+      );
+
+      // Get and return the created campaign
+      const createdCampaign = await this.getCampaignById(nextId);
+      return createdCampaign;
+    } catch (error) {
+      logger.error('Failed to create campaign', {
+        campaignName: campaignData.name,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      ErrorUtils.handleDatabaseError(error, 'createCampaign');
+      throw error;
+    }
+  }
+
+  /**
    * Log campaign activity
    * Records user actions and system changes to campaigns
    */
