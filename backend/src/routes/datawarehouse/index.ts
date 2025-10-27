@@ -14,6 +14,7 @@ import metricsRoutes from './metrics.js';
 import hierarchyRoutes from './hierarchy.js';
 import syncRoutes from './sync.js';
 import exportRoutes from './export.js';
+import performanceRoutes from './performance.js';
 
 const router = Router();
 
@@ -52,6 +53,7 @@ router.use('/metrics', metricsRoutes);
 router.use('/hierarchy', hierarchyRoutes);
 router.use('/sync', syncRoutes);
 router.use('/export', exportRoutes);
+router.use('/performance', performanceRoutes);
 
 /**
  * GET /api/datawarehouse
@@ -74,7 +76,8 @@ router.get('/', ErrorUtils.catchAsync(async (req: Request, res: Response) => {
       metrics: 'Performance metrics and analytics',
       hierarchy: 'Campaign hierarchy and organization structure',
       sync: 'Data synchronization monitoring and health checks',
-      export: 'Data export and custom reporting'
+      export: 'Data export and custom reporting',
+      performance: 'Hierarchical performance analytics with dynamic rollups'
     },
     endpoints: {
       // Campaign endpoints
@@ -112,6 +115,12 @@ router.get('/', ErrorUtils.catchAsync(async (req: Request, res: Response) => {
         csv: 'GET /api/datawarehouse/export/csv',
         json: 'GET /api/datawarehouse/export/json',
         custom: 'POST /api/datawarehouse/export/custom'
+      },
+      // Performance endpoints
+      performance: {
+        data: 'GET /api/datawarehouse/performance',
+        summary: 'GET /api/datawarehouse/performance/summary',
+        filters: 'GET /api/datawarehouse/performance/filters'
       }
     },
     capabilities: {

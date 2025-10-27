@@ -250,6 +250,7 @@ const MarketingDashboard: React.FC = () => {
         acc.totalMessages += metrics.totalMessages || 0;
         acc.totalConvertedUsers += metrics.totalConvertedUsers || 0;
         acc.totalAccounts += metrics.totalAccounts || 0;
+        acc.totalCreditCards += metrics.totalCreditCards || 0;
       }
       acc.totalCost += campaign.cost || 0;
       return acc;
@@ -259,11 +260,12 @@ const MarketingDashboard: React.FC = () => {
       totalMessages: 0,
       totalConvertedUsers: 0,
       totalAccounts: 0,
+      totalCreditCards: 0,
       totalCost: 0,
     });
 
-    // Calculate revenue from conversions
-    const totalRevenue = totals.totalConvertedUsers * 25.50; // Avg revenue per conversion
+    // Calculate revenue from sales (credit card signups)
+    const totalRevenue = totals.totalCreditCards * 50; // $50 per credit card signup
     const totalCost = totals.totalCost;
     const overallROI = totalCost > 0 ? ((totalRevenue - totalCost) / totalCost) * 100 : 0;
 
@@ -293,8 +295,10 @@ const MarketingDashboard: React.FC = () => {
 
       const aCost = a.cost || 0;
       const bCost = b.cost || 0;
-      const aRevenue = (a.metrics?.totalConvertedUsers || 0) * 25.50;
-      const bRevenue = (b.metrics?.totalConvertedUsers || 0) * 25.50;
+      const aSales = a.metrics?.totalCreditCards || 0;
+      const bSales = b.metrics?.totalCreditCards || 0;
+      const aRevenue = aSales * 50; // $50 per credit card signup
+      const bRevenue = bSales * 50;
 
       switch (filters.sortBy) {
         // String comparisons
@@ -313,8 +317,8 @@ const MarketingDashboard: React.FC = () => {
           bValue = b.metrics?.totalRegistrations || 0;
           break;
         case 'sales':
-          aValue = a.metrics?.totalConvertedUsers || 0;
-          bValue = b.metrics?.totalConvertedUsers || 0;
+          aValue = a.metrics?.totalCreditCards || 0;
+          bValue = b.metrics?.totalCreditCards || 0;
           break;
 
         // Calculated columns
@@ -330,6 +334,20 @@ const MarketingDashboard: React.FC = () => {
           aValue = aCost > 0 ? aRevenue / aCost : 0;
           bValue = bCost > 0 ? bRevenue / bCost : 0;
           break;
+        case 'raw_clicks': {
+          const aRawClicks = (a.metrics?.totalSessions || 0) * 1.2;
+          const bRawClicks = (b.metrics?.totalSessions || 0) * 1.2;
+          aValue = aRawClicks;
+          bValue = bRawClicks;
+          break;
+        }
+        case 'cpc_raw': {
+          const aRawClicks = (a.metrics?.totalSessions || 0) * 1.2;
+          const bRawClicks = (b.metrics?.totalSessions || 0) * 1.2;
+          aValue = aRawClicks > 0 ? aCost / aRawClicks : 0;
+          bValue = bRawClicks > 0 ? bCost / bRawClicks : 0;
+          break;
+        }
         case 'cpc_unique': {
           const aTotalSessions = a.metrics?.totalSessions || 0;
           const bTotalSessions = b.metrics?.totalSessions || 0;
@@ -337,17 +355,28 @@ const MarketingDashboard: React.FC = () => {
           bValue = bTotalSessions > 0 ? bCost / bTotalSessions : 0;
           break;
         }
+        case 'raw_reg':
+          aValue = a.metrics?.totalEmailAccounts || 0;
+          bValue = b.metrics?.totalEmailAccounts || 0;
+          break;
+        case 'cpr_raw': {
+          const aRawReg = a.metrics?.totalEmailAccounts || 0;
+          const bRawReg = b.metrics?.totalEmailAccounts || 0;
+          aValue = aRawReg > 0 ? aCost / aRawReg : 0;
+          bValue = bRawReg > 0 ? bCost / bRawReg : 0;
+          break;
+        }
         case 'cpr_confirm':
           aValue = (a.metrics?.totalRegistrations || 0) > 0 ? aCost / (a.metrics?.totalRegistrations || 0) : 0;
           bValue = (b.metrics?.totalRegistrations || 0) > 0 ? bCost / (b.metrics?.totalRegistrations || 0) : 0;
           break;
         case 'cps':
-          aValue = (a.metrics?.totalConvertedUsers || 0) > 0 ? aCost / (a.metrics?.totalConvertedUsers || 0) : 0;
-          bValue = (b.metrics?.totalConvertedUsers || 0) > 0 ? bCost / (b.metrics?.totalConvertedUsers || 0) : 0;
+          aValue = aSales > 0 ? aCost / aSales : 0;
+          bValue = bSales > 0 ? bCost / bSales : 0;
           break;
         case 'rps':
-          aValue = (a.metrics?.totalConvertedUsers || 0) > 0 ? aRevenue / (a.metrics?.totalConvertedUsers || 0) : 0;
-          bValue = (b.metrics?.totalConvertedUsers || 0) > 0 ? bRevenue / (b.metrics?.totalConvertedUsers || 0) : 0;
+          aValue = aSales > 0 ? aRevenue / aSales : 0;
+          bValue = bSales > 0 ? bRevenue / bSales : 0;
           break;
 
         // Placeholder columns - no sorting (all zeros)
@@ -854,11 +883,12 @@ const MarketingDashboard: React.FC = () => {
         PLACEHOLDER COLUMNS (Future Implementation):
         The following columns display placeholder values ("—") until backend support is added:
 
-        1. RAW CLICKS
+        1. RAW CLICKS - ACTIVE (ESTIMATED)
            - Definition: Total number of ad clicks including duplicates (same user clicking multiple times)
-           - Data Source: To be added to Peach AI API - tracking all click events on ad campaigns
-           - Expected Field: campaign.metrics.rawClicks (number)
-           - Calculation: Sum of all click events for the campaign
+           - Data Source: Calculated from sessions data (sessions * 1.2)
+           - Display: Actual estimated count based on unique sessions
+           - Note: This is an estimate matching the backend calculation - real raw clicks tracking to be added later
+           - Status: IMPLEMENTED - displays estimated values
 
         2. UNIQUE CLICKS - NOW DISPLAYS SESSIONS
            - Definition: Total number of unique user sessions
@@ -866,12 +896,13 @@ const MarketingDashboard: React.FC = () => {
            - Display: Actual count from database
            - Note: Column displays sessions data per user request
 
-        3. CPC (RAW)
-           - Definition: Cost Per Click based on total clicks
+        3. CPC (RAW) - ACTIVE (ESTIMATED)
+           - Definition: Cost Per Click based on total clicks (including duplicates)
            - Data Source: Calculated in frontend from existing Cost data
-           - Expected Field: Calculated as: cost / rawClicks
+           - Calculation: cost / rawClicks (where rawClicks = sessions * 1.2)
            - Display Format: ${value.toFixed(2)}
            - Note: Shows "—" when rawClicks is 0 or unavailable
+           - Status: IMPLEMENTED - displays calculated values
 
         4. CPC (UNIQUE)
            - Definition: Cost Per Click based on unique clicks
@@ -880,20 +911,22 @@ const MarketingDashboard: React.FC = () => {
            - Display Format: ${value.toFixed(2)}
            - Note: Shows "—" when uniqueClicks is 0 or unavailable
 
-        5. RAW REG
-           - Definition: Users who initiated registration but didn't complete confirmation
-           - Data Source: To be added to Peach AI API - tracking partial registration attempts
-           - Expected Field: campaign.metrics.rawRegistrations (number)
-           - Calculation: Count of users who provided email/info but didn't verify/confirm account
-           - Relationship: rawRegistrations + confirmRegistrations = total registration attempts
+        5. RAW REG - ACTIVE
+           - Definition: Users who initiated registration (email accounts created)
+           - Data Source: Backend data from campaign.metrics.totalEmailAccounts
+           - Display: Actual count from database
+           - Note: Represents users who provided email/info (partial registration attempts)
+           - Relationship: rawReg (email accounts) represents initial registration interest
+           - Status: IMPLEMENTED - displays actual data
 
-        6. CPR (RAW)
-           - Definition: Cost Per Raw Registration
-           - Data Source: Calculated in frontend from existing Cost data
-           - Expected Field: Calculated as: cost / rawRegistrations
+        6. CPR (RAW) - ACTIVE
+           - Definition: Cost Per Raw Registration (email account creation)
+           - Data Source: Calculated in frontend from existing Cost and Raw Reg data
+           - Calculation: cost / totalEmailAccounts
            - Display Format: ${value.toFixed(2)}
-           - Note: Shows "—" when rawRegistrations is 0 or unavailable
+           - Note: Shows "—" when rawReg is 0 (division by zero protection)
            - Use Case: Measure cost efficiency of attracting users to start registration
+           - Status: IMPLEMENTED - displays calculated values
 
         7. LTREV (Long-Term Revenue)
            - Definition: Customer Lifetime Value or long-term revenue projection
@@ -925,31 +958,31 @@ const MarketingDashboard: React.FC = () => {
            - Use Case: Measure cost efficiency of acquiring confirmed registered users
            - Status: IMPLEMENTED - displays actual calculated values
 
-        9. SALES (formerly CONVERSIONS) - ACTIVE
-           - Definition: Users who became paying customers (completed monetizable action)
-           - Data Source: Backend data from campaign.metrics.totalConvertedUsers
+        9. SALES - ACTIVE
+           - Definition: Credit card signups (users who provided payment information)
+           - Data Source: Backend data from campaign.metrics.totalCreditCards
            - Display: Actual count from database
-           - Revenue Relationship: Each sale generates $25.50 average revenue
-           - Note: This is the ultimate conversion metric - not just registration
+           - Revenue Relationship: Each sale generates $50 revenue (credit card signup value)
+           - Note: Sales represent users who added a credit card (high-intent conversion)
            - Status: IMPLEMENTED - displays actual data
 
         10. CPS (Cost Per Sale) - ACTIVE
-           - Definition: Cost Per Sale (converted user)
+           - Definition: Cost Per Sale (credit card signup)
            - Data Source: Calculated in frontend from existing Cost and Sales data
-           - Calculation: cost / totalConvertedUsers
+           - Calculation: cost / totalCreditCards
            - Display Format: ${value.toFixed(2)}
            - Note: Shows "—" when sales is 0 (division by zero protection)
-           - Use Case: Measure cost efficiency of acquiring paying customers
+           - Use Case: Measure cost efficiency of acquiring credit card signups
            - Status: IMPLEMENTED - displays actual calculated values
 
         11. RPS (Revenue Per Sale) - ACTIVE
-           - Definition: Revenue Per Sale (average revenue per converted user)
+           - Definition: Revenue Per Sale (revenue per credit card signup)
            - Data Source: Calculated in frontend from existing Revenue and Sales data
-           - Calculation: revenue / totalConvertedUsers
+           - Calculation: revenue / totalCreditCards (where revenue = sales * $50)
            - Display Format: ${value.toFixed(2)}
            - Note: Shows "—" when sales is 0 (division by zero protection)
-           - Current Value: Displays $25.50 (average revenue per sale)
-           - Use Case: Track average transaction value per paying customer
+           - Current Value: Displays $50.00 (fixed revenue per credit card signup)
+           - Use Case: Track revenue generated per credit card signup
            - Status: IMPLEMENTED - displays actual calculated values
 
         IMPLEMENTATION NOTES:
@@ -1178,15 +1211,19 @@ const MarketingDashboard: React.FC = () => {
               ) : (
                 paginatedCampaigns.map((campaign) => {
                   const totalSessions = campaign.metrics?.totalSessions || 0;
+                  const rawClicks = totalSessions * 1.2; // Estimate raw clicks (matches backend calculation)
                   const cost = campaign.cost || 0;
-                  const totalConvertedUsers = campaign.metrics?.totalConvertedUsers || 0;
-                  const revenue = totalConvertedUsers * 25.50;
+                  const sales = campaign.metrics?.totalCreditCards || 0; // Sales = credit card signups
+                  const revenue = sales * 50; // $50 per credit card signup (matches backend)
                   const roas = cost > 0 ? revenue / cost : 0;
                   const totalRegistrations = campaign.metrics?.totalRegistrations || 0;
+                  const rawReg = campaign.metrics?.totalEmailAccounts || 0; // Raw registrations (email accounts)
                   const cprConfirm = totalRegistrations > 0 ? cost / totalRegistrations : 0;
-                  const cps = totalConvertedUsers > 0 ? cost / totalConvertedUsers : 0;
-                  const rps = totalConvertedUsers > 0 ? revenue / totalConvertedUsers : 0;
+                  const cprRaw = rawReg > 0 ? cost / rawReg : 0;
+                  const cps = sales > 0 ? cost / sales : 0;
+                  const rps = sales > 0 ? revenue / sales : 0;
                   const cpcUnique = totalSessions > 0 ? cost / totalSessions : 0;
+                  const cpcRawClicks = rawClicks > 0 ? cost / rawClicks : 0;
 
                   return (
                     <tr
@@ -1224,8 +1261,8 @@ const MarketingDashboard: React.FC = () => {
                           );
                         })()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
+                        {Math.round(rawClicks).toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         {(campaign.metrics?.totalSessions || 0).toLocaleString()}
@@ -1233,17 +1270,17 @@ const MarketingDashboard: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         ${cost.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
+                        {cpcRawClicks > 0 ? `$${cpcRawClicks.toFixed(2)}` : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         {cpcUnique > 0 ? `$${cpcUnique.toFixed(2)}` : '—'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
+                        {rawReg.toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                        —
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
+                        {cprRaw > 0 ? `$${cprRaw.toFixed(2)}` : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         {totalRegistrations.toLocaleString()}
@@ -1252,7 +1289,7 @@ const MarketingDashboard: React.FC = () => {
                         {cprConfirm > 0 ? `$${cprConfirm.toFixed(2)}` : '—'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
-                        {totalConvertedUsers.toLocaleString()}
+                        {sales.toLocaleString()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--foreground)' }}>
                         {cps > 0 ? `$${cps.toFixed(2)}` : '—'}

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import PerformanceOverviewPage from '@pages/PerformanceOverviewPage'
 import MarketingDashboard from '@/components/MarketingDashboard'
 import DataWarehouseDashboard from '@pages/DataWarehouseDashboard'
 import CampaignDetailsPage from '@pages/CampaignDetailsPage'
@@ -11,11 +12,11 @@ function App() {
     <BrowserRouter>
       <Layout>
         <Routes>
-          <Route path="/" element={<MarketingDashboard />} />
+          <Route path="/" element={<PerformanceOverviewPage />} />
           <Route path="/datawarehouse" element={<DataWarehouseDashboard />} />
+          <Route path="/campaigns" element={<MarketingDashboard />} />
           <Route path="/campaigns/new" element={<CampaignCreationPage />} />
           <Route path="/campaigns/:id" element={<CampaignDetailsPage />} />
-          <Route path="/campaigns" element={<MarketingDashboard />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

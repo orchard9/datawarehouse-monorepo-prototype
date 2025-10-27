@@ -1,5 +1,5 @@
 import React from 'react'
-import { Database, Menu, Sun, Moon } from 'lucide-react'
+import { Database, Menu, Sun, Moon, BarChart3 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useTheme } from '../hooks/useTheme'
@@ -22,6 +22,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { resolvedTheme, toggleTheme } = useTheme()
 
   const navigation = [
+    { name: 'Overview', href: '/', icon: BarChart3, ariaLabel: 'View performance overview' },
     { name: 'Campaigns', href: '/campaigns', icon: Database, ariaLabel: 'View campaigns' },
   ]
 

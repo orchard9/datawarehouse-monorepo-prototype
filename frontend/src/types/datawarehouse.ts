@@ -73,6 +73,8 @@ export interface CampaignMetrics {
   totalMessages: number;
   totalConvertedUsers: number;
   totalAccounts: number;
+  totalEmailAccounts: number;
+  totalCreditCards: number;
   registrationRate: number;
   conversionRate: number;
   messageRate: number;
