@@ -68,6 +68,10 @@ export const CampaignCreationPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Network autocomplete state
+  const [showNetworkSuggestions, setShowNetworkSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
 
@@ -185,6 +189,64 @@ export const CampaignCreationPage: React.FC = () => {
     }
   };
 
+  // Filter network suggestions based on input
+  const filteredNetworks = formData.hierarchy.network
+    ? NETWORK_OPTIONS.filter(network =>
+        network.toLowerCase().includes(formData.hierarchy.network.toLowerCase())
+      )
+    : NETWORK_OPTIONS;
+
+  // Handle network input change with autocomplete
+  const handleNetworkChange = (value: string) => {
+    handleHierarchyChange('network', value);
+    setShowNetworkSuggestions(true);
+    setSelectedSuggestionIndex(-1);
+  };
+
+  // Handle network suggestion selection
+  const selectNetworkSuggestion = (network: string) => {
+    handleHierarchyChange('network', network);
+    setShowNetworkSuggestions(false);
+    setSelectedSuggestionIndex(-1);
+  };
+
+  // Handle keyboard navigation for network autocomplete
+  const handleNetworkKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showNetworkSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setShowNetworkSuggestions(true);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev =>
+          prev < filteredNetworks.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => (prev > 0 ? prev - 1 : -1));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (selectedSuggestionIndex >= 0 && filteredNetworks[selectedSuggestionIndex]) {
+          selectNetworkSuggestion(filteredNetworks[selectedSuggestionIndex]);
+        } else {
+          setShowNetworkSuggestions(false);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setShowNetworkSuggestions(false);
+        setSelectedSuggestionIndex(-1);
+        break;
+    }
+  };
+
   return (
     <div className="p-6 min-h-screen" style={{ backgroundColor: 'var(--background)' }}>
       {/* Header with Breadcrumb */}
@@ -289,28 +351,59 @@ export const CampaignCreationPage: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Network */}
-            <div>
+            <div className="relative">
               <label htmlFor="network" className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
                 1. Network <span className="text-red-500">*</span>
               </label>
-              <select
+              <input
                 id="network"
+                type="text"
                 value={formData.hierarchy.network}
-                onChange={(e) => handleHierarchyChange('network', e.target.value)}
+                onChange={(e) => handleNetworkChange(e.target.value)}
+                onKeyDown={handleNetworkKeyDown}
+                onFocus={() => setShowNetworkSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowNetworkSuggestions(false), 200)}
+                placeholder="Type network name (e.g., Facebook, Google)..."
+                maxLength={255}
                 className="w-full px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 style={{
                   border: `1px solid ${errors.network ? '#ef4444' : 'var(--border)'}`,
                   backgroundColor: 'var(--background)',
                   color: 'var(--foreground)'
                 }}
-              >
-                <option value="">Select network...</option>
-                {NETWORK_OPTIONS.map(network => (
-                  <option key={network} value={network}>{network}</option>
-                ))}
-              </select>
+                autoComplete="off"
+              />
               {errors.network && (
                 <p className="text-xs text-red-600 mt-1">{errors.network}</p>
+              )}
+
+              {/* Autocomplete dropdown */}
+              {showNetworkSuggestions && filteredNetworks.length > 0 && (
+                <div
+                  className="absolute z-50 w-full mt-1 rounded-lg shadow-lg overflow-hidden"
+                  style={{
+                    backgroundColor: 'var(--card)',
+                    border: '1px solid var(--border)',
+                    maxHeight: '240px',
+                    overflowY: 'auto'
+                  }}
+                >
+                  {filteredNetworks.map((network, index) => (
+                    <button
+                      key={network}
+                      type="button"
+                      onClick={() => selectNetworkSuggestion(network)}
+                      className="w-full px-4 py-2 text-left transition-colors duration-100"
+                      style={{
+                        backgroundColor: index === selectedSuggestionIndex ? 'var(--muted)' : 'transparent',
+                        color: 'var(--foreground)'
+                      }}
+                      onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                    >
+                      {network}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
 

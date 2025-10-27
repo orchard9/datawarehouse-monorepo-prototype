@@ -94,7 +94,6 @@ const MarketingDashboard: React.FC = () => {
 
   // UI-only state (not synced with URL)
   const [showVendorDropdown, setShowVendorDropdown] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
@@ -839,7 +838,7 @@ const MarketingDashboard: React.FC = () => {
               <span>{isSyncing ? 'Syncing...' : 'Refresh Data'}</span>
             </button>
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => navigate('/campaigns/new')}
               className="btn-primary rounded-lg flex items-center space-x-2"
             >
               <Plus className="h-4 w-4" />
@@ -1361,30 +1360,6 @@ const MarketingDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Create Campaign Modal (placeholder) */}
-      {showCreateModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'var(--surface-overlay)' }}>
-          <div className="rounded-lg p-6 w-96" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-            <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--card-foreground)' }}>Create New Campaign</h2>
-            <p className="mb-4" style={{ color: 'var(--muted-foreground)' }}>Campaign creation form would go here.</p>
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 rounded-lg hover:opacity-80"
-                style={{
-                  color: 'var(--foreground)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                Cancel
-              </button>
-              <button className="btn-primary rounded-lg">
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
