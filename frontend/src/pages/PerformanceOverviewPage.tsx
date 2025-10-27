@@ -12,7 +12,8 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:37951/api/datawarehouse';
+// Use relative URL - proxied through Vite to backend
+const API_BASE_URL = '/api/datawarehouse';
 
 // Type definitions matching backend PerformanceService
 type DisplayMode = 'network' | 'domain' | 'placement' | 'targeting' | 'special';
@@ -77,8 +78,8 @@ const PerformanceOverviewPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [displayMode, setDisplayMode] = useState<DisplayMode>('network');
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortColumn, setSortColumn] = useState<string | null>('cost');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Fetch performance data from API
   const fetchPerformanceData = async () => {

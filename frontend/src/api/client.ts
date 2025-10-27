@@ -8,7 +8,8 @@ import type { AxiosInstance, AxiosRequestConfig } from 'axios';
 import type { ApiResponse, ApiError, PaginationMeta } from '@/types/datawarehouse';
 
 // Configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:37951';
+// Use empty string to make requests relative - proxied through Vite to backend
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const API_TIMEOUT = 30000; // 30 seconds
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second

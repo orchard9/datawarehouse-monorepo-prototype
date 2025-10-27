@@ -172,26 +172,62 @@ class DatabaseOperations:
     
     # Campaign hierarchy operations
     def upsert_campaign_hierarchy(self, hierarchy_data: Dict[str, Any]) -> int:
-        """Insert or update campaign hierarchy mapping"""
+        """
+        Insert or update campaign hierarchy mapping
+
+        IMPORTANT: Checks for active overrides first. If an override exists,
+        it will be used instead of the provided hierarchy_data. This ensures
+        CSV-imported hierarchies persist across syncs.
+        """
         cursor = self.conn.cursor()
-        
+        campaign_id = hierarchy_data['campaign_id']
+
+        # Check for active override first
+        cursor.execute("""
+            SELECT network, domain, placement, targeting, special
+            FROM campaign_hierarchy_overrides
+            WHERE campaign_id = ? AND is_active = 1
+            ORDER BY overridden_at DESC
+            LIMIT 1
+        """, (campaign_id,))
+
+        override = cursor.fetchone()
+
+        # If override exists, use override data instead of rule-based mapping
+        # Note: Override fields can be NULL, so we need to fall back to rule-based data
+        if override:
+            final_network = override['network'] or hierarchy_data['network']
+            final_domain = override['domain'] or hierarchy_data['domain']
+            final_placement = override['placement'] or hierarchy_data['placement']
+            final_targeting = override['targeting'] or hierarchy_data['targeting']
+            final_special = override['special'] or hierarchy_data['special']
+            final_confidence = 1.0  # Manual overrides get full confidence
+        else:
+            # No override, use rule-based mapping data
+            final_network = hierarchy_data['network']
+            final_domain = hierarchy_data['domain']
+            final_placement = hierarchy_data['placement']
+            final_targeting = hierarchy_data['targeting']
+            final_special = hierarchy_data['special']
+            final_confidence = hierarchy_data.get('mapping_confidence', 1.0)
+
         cursor.execute("""
             INSERT OR REPLACE INTO campaign_hierarchy
             (campaign_id, campaign_name, network, domain, placement, targeting, special,
              mapping_confidence, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            hierarchy_data['campaign_id'],
+            campaign_id,
             hierarchy_data['campaign_name'],
-            hierarchy_data['network'],
-            hierarchy_data['domain'],
-            hierarchy_data['placement'],
-            hierarchy_data['targeting'],
-            hierarchy_data['special'],
-            hierarchy_data.get('mapping_confidence', 1.0),
+            final_network,
+            final_domain,
+            final_placement,
+            final_targeting,
+            final_special,
+            final_confidence,
             datetime.now(timezone.utc).isoformat()
         ))
-        
+
         self.conn.commit()
         return cursor.lastrowid
     

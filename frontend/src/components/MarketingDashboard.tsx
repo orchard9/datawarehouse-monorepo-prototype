@@ -101,7 +101,7 @@ const MarketingDashboard: React.FC = () => {
   const handleRefresh = async () => {
     setIsSyncing(true);
     try {
-      const response = await fetch('http://localhost:37951/api/datawarehouse/sync/trigger', {
+      const response = await fetch('/api/datawarehouse/sync/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -140,7 +140,7 @@ const MarketingDashboard: React.FC = () => {
     }
 
     // Trigger download
-    const url = `http://localhost:37951/api/datawarehouse/export/csv?${params.toString()}`;
+    const url = `/api/datawarehouse/export/csv?${params.toString()}`;
     window.open(url, '_blank');
   };
 

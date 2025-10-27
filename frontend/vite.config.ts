@@ -20,6 +20,16 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 37950,
       host: true,
+      allowedHosts: [
+        'gangly-intramural-goldie.ngrok-free.dev',
+      ],
+      proxy: {
+        '/api': {
+          target: 'http://localhost:37951',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     resolve: {
       alias: {
