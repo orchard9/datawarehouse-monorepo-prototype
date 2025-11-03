@@ -43,6 +43,7 @@ import { CostEditModal } from '@/components/CostEditModal';
 import { AccountManagerSection } from '@/components/AccountManagerSection';
 import { CampaignInformationCard } from '@/components/CampaignInformationCard';
 import { dataWarehouseApi } from '@/api/datawarehouse';
+import type { CostOverride } from '@/types/datawarehouse';
 
 interface TimeBreakdownFilters {
   timeRange: 'alltime' | 'today' | 'yesterday' | 'last7days' | 'last14days' | 'last30days' | 'last90days' | 'custom';
@@ -147,6 +148,10 @@ const CampaignDetailsPage: React.FC = () => {
   // Activity pagination
   const [activityPage, setActivityPage] = useState(1);
 
+  // Cost history state
+  const [costHistory, setCostHistory] = useState<CostOverride[]>([]);
+  const [costHistoryLoading, setCostHistoryLoading] = useState(false);
+
   // Sync filters to URL
   useEffect(() => {
     const params = new URLSearchParams();
@@ -217,7 +222,12 @@ const CampaignDetailsPage: React.FC = () => {
   // Fetch campaign and metrics data
   const { campaign, loading: campaignLoading, error: campaignError, refetch: refetchCampaign } = useCampaign(campaignId);
   const { metrics, loading: metricsLoading } = useCampaignMetrics(campaignId, metricsQuery);
-  const { activity, meta: activityMeta, loading: activityLoading } = useCampaignActivity(campaignId, activityPage, 5);
+  const { activity, meta: activityMeta, loading: activityLoading } = useCampaignActivity(
+    campaignId,
+    activityPage,
+    5,
+    ['cost_update', 'cost_delete'] // Exclude cost activities since they're shown in Cost History
+  );
 
   // Handle invalid campaign ID
   useEffect(() => {
@@ -225,6 +235,27 @@ const CampaignDetailsPage: React.FC = () => {
       navigate('/', { replace: true });
     }
   }, [campaignId, navigate]);
+
+  // Fetch cost history
+  const fetchCostHistory = useCallback(async () => {
+    if (!campaignId) return;
+
+    setCostHistoryLoading(true);
+    try {
+      const response = await dataWarehouseApi.campaigns.getCostHistory(campaignId, 20);
+      setCostHistory(response.data?.history || []);
+    } catch (error) {
+      console.error('Failed to fetch cost history:', error);
+      setCostHistory([]);
+    } finally {
+      setCostHistoryLoading(false);
+    }
+  }, [campaignId]);
+
+  // Load cost history on mount and when campaign changes
+  useEffect(() => {
+    fetchCostHistory();
+  }, [fetchCostHistory]);
 
   // Prepare chart data
   const chartData = useMemo<ChartDataPoint[]>(() => {
@@ -381,6 +412,9 @@ const CampaignDetailsPage: React.FC = () => {
   const handleSaveCost = useCallback(async (data: {
     cost: number;
     cost_status: 'confirmed' | 'api_sourced';
+    start_date: string;
+    end_date: string;
+    billing_period: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
     override_reason?: string;
     overridden_by: string;
   }) => {
@@ -392,10 +426,13 @@ const CampaignDetailsPage: React.FC = () => {
 
       // Refresh campaign data to show updated cost
       await refetchCampaign();
+
+      // Refresh cost history to show new entry
+      await fetchCostHistory();
     } catch (error) {
       throw error;
     }
-  }, [campaignId, refetchCampaign]);
+  }, [campaignId, refetchCampaign, fetchCostHistory]);
 
   const handleDeleteCost = useCallback(async () => {
     if (!campaignId) return;
@@ -406,10 +443,13 @@ const CampaignDetailsPage: React.FC = () => {
 
       // Refresh campaign data to show reverted cost
       await refetchCampaign();
+
+      // Refresh cost history to show deletion
+      await fetchCostHistory();
     } catch (error) {
       throw error;
     }
-  }, [campaignId, refetchCampaign]);
+  }, [campaignId, refetchCampaign, fetchCostHistory]);
 
   // Account manager update handler
   const handleUpdateAccountManager = useCallback(async (manager: string | null) => {
@@ -951,9 +991,99 @@ const CampaignDetailsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Activity Log */}
+      {/* Cost History */}
       <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-        <h3 className="text-lg font-semibold mb-6" style={{ color: 'var(--card-foreground)' }}>Recent Activity</h3>
+        <h3 className="text-lg font-semibold mb-6" style={{ color: 'var(--card-foreground)' }}>Cost History</h3>
+
+        {costHistoryLoading ? (
+          <div className="text-center py-8">
+            <div className="h-6 w-6 mx-auto mb-2 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: 'var(--muted-foreground)' }} />
+            <p style={{ color: 'var(--muted-foreground)' }}>Loading cost history...</p>
+          </div>
+        ) : costHistory && costHistory.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Date Range</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Cost</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Billing Period</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Status</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Reason</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Modified By</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Modified At</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium" style={{ color: 'var(--muted-foreground)' }}>Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {costHistory.map((historyItem) => (
+                  <tr
+                    key={historyItem.id}
+                    style={{ borderBottom: '1px solid var(--border)' }}
+                    className="hover:bg-muted/50 transition-colors"
+                  >
+                    <td className="py-3 px-4 text-sm" style={{ color: 'var(--foreground)' }}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{new Date(historyItem.start_date).toLocaleDateString()}</span>
+                        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          to {new Date(historyItem.end_date).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                      ${historyItem.cost.toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4 text-sm" style={{ color: 'var(--foreground)' }}>
+                      <span className="capitalize">{historyItem.billing_period}</span>
+                    </td>
+                    <td className="py-3 px-4 text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        historyItem.cost_status === 'confirmed'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                      }`}>
+                        {historyItem.cost_status === 'confirmed' ? 'Confirmed' : 'API'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                      {historyItem.override_reason || '-'}
+                    </td>
+                    <td className="py-3 px-4 text-sm" style={{ color: 'var(--foreground)' }}>
+                      {historyItem.overridden_by}
+                    </td>
+                    <td className="py-3 px-4 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                      {new Date(historyItem.overridden_at).toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-sm">
+                      {historyItem.is_active ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <DollarSign className="h-12 w-12 mx-auto mb-3 opacity-30" style={{ color: 'var(--muted-foreground)' }} />
+            <p style={{ color: 'var(--muted-foreground)' }}>No cost history available</p>
+            <p className="text-sm mt-2" style={{ color: 'var(--muted-foreground)' }}>
+              Cost changes will appear here once you update the campaign cost
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Campaign Activity Log */}
+      <div className="mt-8 rounded-lg shadow p-6" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+        <h3 className="text-lg font-semibold mb-6" style={{ color: 'var(--card-foreground)' }}>Campaign Activity</h3>
 
         {activityLoading ? (
           <div className="text-center py-8">
@@ -1025,7 +1155,10 @@ const CampaignDetailsPage: React.FC = () => {
           </>
         ) : (
           <div className="text-center py-8">
-            <p style={{ color: 'var(--muted-foreground)' }}>No recent activity found</p>
+            <p style={{ color: 'var(--muted-foreground)' }}>No campaign activity found</p>
+            <p className="text-sm mt-2" style={{ color: 'var(--muted-foreground)' }}>
+              Syncs, hierarchy updates, and status changes will appear here
+            </p>
           </div>
         )}
       </div>
@@ -1054,6 +1187,8 @@ const CampaignDetailsPage: React.FC = () => {
         campaignId={campaignId}
         currentCost={campaign.cost || 0}
         currentCostStatus={campaign.cost_status || 'estimated'}
+        firstActivityDate={campaign.first_activity_date || undefined}
+        lastActivityDate={campaign.last_activity_date || undefined}
         onSave={handleSaveCost}
         onDelete={campaign.cost_status !== 'estimated' ? handleDeleteCost : undefined}
       />

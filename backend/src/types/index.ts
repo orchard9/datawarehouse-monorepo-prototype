@@ -555,6 +555,7 @@ export interface CampaignActivity {
 export interface CampaignActivityQuery extends PaginationQuery {
   campaignId: number;
   activityType?: CampaignActivity['activity_type'];
+  excludeActivityTypes?: CampaignActivity['activity_type'][];
   source?: CampaignActivity['source'];
   startDate?: string;
   endDate?: string;

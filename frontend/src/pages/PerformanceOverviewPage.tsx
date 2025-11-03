@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight,
   ChevronDown,
@@ -9,8 +10,10 @@ import {
   BarChart3,
   AlertCircle,
   Loader2,
-  ArrowUpDown
+  ArrowUpDown,
+  Search
 } from 'lucide-react';
+import { useDebounce } from '@/hooks/useDebounce';
 
 // Use relative URL - proxied through Vite to backend
 const API_BASE_URL = '/api/datawarehouse';
@@ -73,6 +76,7 @@ interface PerformanceResponse {
 }
 
 const PerformanceOverviewPage: React.FC = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +84,13 @@ const PerformanceOverviewPage: React.FC = () => {
   const [displayMode, setDisplayMode] = useState<DisplayMode>('network');
   const [sortColumn, setSortColumn] = useState<string | null>('cost');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+
+  // Date range filter state
+  const [dateRange, setDateRange] = useState<string>('last30days');
+  const [startDate, setStartDate] = useState<string | undefined>(undefined);
+  const [endDate, setEndDate] = useState<string | undefined>(undefined);
 
   // Fetch performance data from API
   const fetchPerformanceData = async () => {
@@ -87,13 +98,56 @@ const PerformanceOverviewPage: React.FC = () => {
     setError(null);
 
     try {
+      // Calculate actual start/end dates based on dateRange selection
+      let apiStartDate: string | undefined;
+      let apiEndDate: string | undefined;
+
+      if (dateRange === 'custom') {
+        apiStartDate = startDate;
+        apiEndDate = endDate;
+      } else if (dateRange !== 'alltime') {
+        const now = new Date();
+        let calculatedStart: Date;
+
+        switch (dateRange) {
+          case 'today':
+            calculatedStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+          case 'yesterday':
+            calculatedStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+            apiEndDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString().split('T')[0];
+            break;
+          case 'last7days':
+            calculatedStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case 'last14days':
+            calculatedStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+            break;
+          case 'last30days':
+            calculatedStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+          case 'last90days':
+            calculatedStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+            break;
+          default:
+            calculatedStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        }
+
+        apiStartDate = calculatedStart.toISOString().split('T')[0];
+        if (!apiEndDate && dateRange !== 'yesterday') {
+          apiEndDate = undefined; // Let backend use today as default
+        }
+      }
+
       const response = await axios.get<{
         success: boolean;
         message: string;
         data: PerformanceResponse;
       }>(`${API_BASE_URL}/performance`, {
         params: {
-          display_mode: displayMode
+          display_mode: displayMode,
+          ...(apiStartDate && { start_date: apiStartDate }),
+          ...(apiEndDate && { end_date: apiEndDate })
         }
       });
 
@@ -110,10 +164,197 @@ const PerformanceOverviewPage: React.FC = () => {
     }
   };
 
-  // Fetch data when display mode changes
+  // Fetch data when display mode or date range changes
   useEffect(() => {
     fetchPerformanceData();
-  }, [displayMode]);
+  }, [displayMode, dateRange, startDate, endDate]);
+
+  // Flatten hierarchical data into CSV rows
+  const flattenDataForExport = (nodes: (HierarchyNode | PerformanceLeafNode)[], parentPath: string = ''): any[] => {
+    const rows: any[] = [];
+
+    nodes.forEach((node) => {
+      const nodePath = parentPath ? `${parentPath} > ${node.name}` : node.name;
+      const isLeaf = 'id' in node;
+
+      // Add current node as a row
+      rows.push({
+        name: nodePath,
+        level: node.level || displayMode,
+        rawClicks: node.metrics.rawClicks,
+        uniqueClicks: node.metrics.uniqueClicks,
+        cost: node.metrics.cost,
+        cpcRaw: node.metrics.cpcRaw,
+        cpcUnique: node.metrics.cpcUnique,
+        rawReg: node.metrics.rawReg,
+        cprRaw: node.metrics.cprRaw,
+        confirmReg: node.metrics.confirmReg,
+        cprConfirm: node.metrics.cprConfirm,
+        sales: node.metrics.sales,
+        cps: node.metrics.cps,
+        revenue: node.metrics.revenue,
+        rps: node.metrics.rps,
+        roas: node.metrics.roas,
+        ltRoas: node.metrics.ltRoas,
+      });
+
+      // Recursively add children if they exist
+      if (!isLeaf && 'children' in node && node.children && node.children.length > 0) {
+        rows.push(...flattenDataForExport(node.children, nodePath));
+      }
+    });
+
+    return rows;
+  };
+
+  // Convert data to CSV format
+  const convertToCSV = (rows: any[]): string => {
+    if (rows.length === 0) return '';
+
+    // CSV Headers matching the table columns
+    const headers = [
+      displayMode === 'special' ? 'Campaign' : displayMode.charAt(0).toUpperCase() + displayMode.slice(1),
+      'Raw Clicks',
+      'Unique Clicks',
+      'Cost',
+      'CPC Raw',
+      'CPC Unique',
+      'Raw Reg',
+      'CPR Raw',
+      'Confirm Reg',
+      'CPR Confirm',
+      'Sales',
+      'CPS',
+      'Revenue',
+      'RPS',
+      'ROAS',
+      'LT ROAS'
+    ];
+
+    // Create CSV content
+    const csvRows = [headers.join(',')];
+
+    rows.forEach(row => {
+      const values = [
+        `"${row.name}"`, // Wrap in quotes to handle commas in names
+        row.rawClicks,
+        row.uniqueClicks,
+        row.cost.toFixed(2),
+        row.cpcRaw.toFixed(2),
+        row.cpcUnique.toFixed(2),
+        row.rawReg,
+        row.cprRaw.toFixed(2),
+        row.confirmReg,
+        row.cprConfirm.toFixed(2),
+        row.sales,
+        row.cps.toFixed(2),
+        row.revenue.toFixed(2),
+        row.rps.toFixed(2),
+        row.roas.toFixed(2),
+        row.ltRoas.toFixed(2)
+      ];
+      csvRows.push(values.join(','));
+    });
+
+    return csvRows.join('\n');
+  };
+
+  // Export data to CSV
+  const handleExport = () => {
+    if (!sortedData && !data) return;
+
+    const dataToExport = sortedData || data;
+    if (!dataToExport) return;
+
+    // Flatten the hierarchical data
+    const flattenedRows = flattenDataForExport(dataToExport.data as (HierarchyNode | PerformanceLeafNode)[]);
+
+    // Convert to CSV
+    const csvContent = convertToCSV(flattenedRows);
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+
+    link.setAttribute('href', url);
+    link.setAttribute('download', `performance_${displayMode}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Filter hierarchical data based on search term
+  const filterHierarchyData = (
+    nodes: (HierarchyNode | PerformanceLeafNode)[],
+    searchTerm: string
+  ): (HierarchyNode | PerformanceLeafNode)[] => {
+    if (!searchTerm.trim()) return nodes;
+
+    const searchLower = searchTerm.toLowerCase();
+
+    const filterNode = (node: HierarchyNode | PerformanceLeafNode): (HierarchyNode | PerformanceLeafNode) | null => {
+      const isLeaf = 'id' in node;
+
+      // Check if current node matches search
+      const nameMatches = node.name.toLowerCase().includes(searchLower);
+
+      // For leaf nodes, also search through hierarchy dimensions
+      let dimensionMatches = false;
+      if (isLeaf) {
+        const leafNode = node as PerformanceLeafNode;
+        dimensionMatches =
+          leafNode.network.toLowerCase().includes(searchLower) ||
+          leafNode.domain.toLowerCase().includes(searchLower) ||
+          leafNode.placement.toLowerCase().includes(searchLower) ||
+          leafNode.targeting.toLowerCase().includes(searchLower) ||
+          leafNode.special.toLowerCase().includes(searchLower);
+      }
+
+      // If leaf node matches, return it
+      if (isLeaf && (nameMatches || dimensionMatches)) {
+        return node;
+      }
+
+      // For non-leaf nodes, recursively filter children
+      if (!isLeaf && 'children' in node && node.children) {
+        const filteredChildren = node.children
+          .map(child => filterNode(child))
+          .filter((child): child is HierarchyNode | PerformanceLeafNode => child !== null);
+
+        // Include parent if it matches or has matching children
+        if (nameMatches || filteredChildren.length > 0) {
+          return {
+            ...node,
+            children: filteredChildren
+          } as HierarchyNode;
+        }
+      }
+
+      // If non-leaf node matches but has no children (shouldn't happen), include it
+      if (nameMatches && !isLeaf) {
+        return node;
+      }
+
+      return null;
+    };
+
+    return nodes
+      .map(node => filterNode(node))
+      .filter((node): node is HierarchyNode | PerformanceLeafNode => node !== null);
+  };
+
+  // Apply search filter to data
+  const filteredData = useMemo(() => {
+    if (!data || !debouncedSearchTerm) return data;
+
+    return {
+      ...data,
+      data: filterHierarchyData(data.data as (HierarchyNode | PerformanceLeafNode)[], debouncedSearchTerm)
+    };
+  }, [data, debouncedSearchTerm]);
 
   // Debug: Log data structure when it changes
   useEffect(() => {
@@ -178,7 +419,7 @@ const PerformanceOverviewPage: React.FC = () => {
 
   // Sort data based on current sort column and direction
   const sortedData = useMemo(() => {
-    if (!data || !sortColumn) return data;
+    if (!filteredData || !sortColumn) return filteredData;
 
     const sortNodes = (nodes: (HierarchyNode | PerformanceLeafNode)[]): (HierarchyNode | PerformanceLeafNode)[] => {
       const sorted = [...nodes].sort((a, b) => {
@@ -210,10 +451,10 @@ const PerformanceOverviewPage: React.FC = () => {
     };
 
     return {
-      ...data,
-      data: sortNodes(Array.isArray(data.data) ? data.data : [])
+      ...filteredData,
+      data: sortNodes(Array.isArray(filteredData.data) ? filteredData.data : [])
     };
-  }, [data, sortColumn, sortDirection]);
+  }, [filteredData, sortColumn, sortDirection]);
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -297,9 +538,10 @@ const PerformanceOverviewPage: React.FC = () => {
     rows.push(
       <tr
         key={nodePath}
+        onClick={isLeaf ? () => navigate(`/campaigns/${(node as PerformanceLeafNode).id}`) : undefined}
         className={`
           border-b border-gray-200 hover:bg-gray-50 transition-colors
-          ${isLeaf ? 'bg-white' : 'bg-gray-50 font-medium'}
+          ${isLeaf ? 'bg-white cursor-pointer' : 'bg-gray-50 font-medium'}
         `}
       >
         <td className="px-4 py-3 sticky left-0 bg-inherit z-10 border-r border-gray-200">
@@ -352,7 +594,11 @@ const PerformanceOverviewPage: React.FC = () => {
   // Render flat data (for special mode)
   const renderFlatData = (items: PerformanceLeafNode[]): JSX.Element[] => {
     return items.map(item => (
-      <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+      <tr
+        key={item.id}
+        onClick={() => navigate(`/campaigns/${item.id}`)}
+        className="border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer"
+      >
         <td className="px-4 py-3 sticky left-0 bg-white z-10 border-r border-gray-200">
           <div className="flex items-center gap-2">
             <span className="text-sm truncate max-w-xs">{item.name}</span>
@@ -446,7 +692,11 @@ const PerformanceOverviewPage: React.FC = () => {
               Refresh
             </button>
 
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            <button
+              onClick={handleExport}
+              disabled={!data || loading}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Download className="h-4 w-4" />
               Export
             </button>
@@ -455,7 +705,26 @@ const PerformanceOverviewPage: React.FC = () => {
 
         {/* Filters */}
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Search Input */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Search
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search networks, domains, campaigns..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          <div className={`grid grid-cols-1 gap-4 ${dateRange === 'custom' ? 'md:grid-cols-2 lg:grid-cols-5' : 'md:grid-cols-3'}`}>
             {/* Display Mode Selector */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -474,15 +743,54 @@ const PerformanceOverviewPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Date Range Info */}
+            {/* Date Range Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Date Range
               </label>
-              <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
-                {data.metadata.dateRange.start} to {data.metadata.dateRange.end}
-              </div>
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="alltime">All Time</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="last7days">Last 7 Days</option>
+                <option value="last14days">Last 14 Days</option>
+                <option value="last30days">Last 30 Days</option>
+                <option value="last90days">Last 90 Days</option>
+                <option value="custom">Custom Range</option>
+              </select>
             </div>
+
+            {/* Custom Date Range Inputs - Show when 'custom' is selected */}
+            {dateRange === 'custom' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate || ''}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate || ''}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </>
+            )}
 
             {/* Total Records */}
             <div>
@@ -494,6 +802,14 @@ const PerformanceOverviewPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Active Date Range Display */}
+          {data && (
+            <div className="mt-4 text-sm text-gray-600">
+              <span className="font-medium">Showing data for:</span>{' '}
+              {data.metadata.dateRange.start} to {data.metadata.dateRange.end}
+            </div>
+          )}
         </div>
       </div>
 

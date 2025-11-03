@@ -195,6 +195,9 @@ export class PerformanceService {
 
     const whereClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
 
+    // Add date range parameters for cost override filtering (endDate, startDate order for overlap check)
+    params.push(endDate, startDate);
+
     const sql = `
       SELECT
         c.id,
@@ -205,14 +208,23 @@ export class PerformanceService {
         ch.placement,
         ch.targeting,
         ch.special,
-        COALESCE(c.cost, 0) as cost,
+        COALESCE(c.cost, 0) as base_cost,
+        MAX(cco.cost) as override_cost,
+        MAX(cco.start_date) as override_start,
+        MAX(cco.end_date) as override_end,
         COALESCE(SUM(hd.sessions), 0) as sessions,
         COALESCE(SUM(hd.registrations), 0) as registrations,
         COALESCE(SUM(hd.email_accounts), 0) as email_accounts,
-        COALESCE(SUM(hd.credit_cards), 0) as credit_cards
+        COALESCE(SUM(hd.credit_cards), 0) as credit_cards,
+        MIN(datetime(hd.unix_hour * 3600, 'unixepoch')) as first_activity_date,
+        MAX(datetime(hd.unix_hour * 3600, 'unixepoch')) as last_activity_date
       FROM campaigns c
       LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
       LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
+      LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id
+        AND cco.is_active = 1
+        AND date(cco.start_date) <= date(?)
+        AND date(cco.end_date) >= date(?)
       WHERE ch.network IS NOT NULL
         ${whereClause}
       GROUP BY c.id, c.name, c.status, ch.network, ch.domain, ch.placement, ch.targeting, ch.special, c.cost
@@ -227,7 +239,57 @@ export class PerformanceService {
       const registrations = row.registrations || 0;
       const emailAccounts = row.email_accounts || 0;
       const creditCards = row.credit_cards || 0;
-      const cost = row.cost || 0;
+
+      // Calculate prorated cost
+      let calculatedCost = row.base_cost || 0;
+
+      // Use cost override if available and calculate proration
+      if (row.override_cost != null && row.override_start && row.override_end) {
+        const queryStartDate = new Date(startDate);
+        const queryEndDate = new Date(endDate);
+        const overrideStartDate = new Date(row.override_start);
+        const overrideEndDate = new Date(row.override_end);
+
+        // Calculate overlap between query range and override period
+        const overlapStart = new Date(Math.max(queryStartDate.getTime(), overrideStartDate.getTime()));
+        const overlapEnd = new Date(Math.min(queryEndDate.getTime(), overrideEndDate.getTime()));
+
+        if (overlapStart <= overlapEnd) {
+          // Calculate total days in override period
+          const overrideDays = Math.ceil((overrideEndDate.getTime() - overrideStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          // Calculate overlap days
+          const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+          // Prorate the override cost
+          calculatedCost = (row.override_cost / overrideDays) * overlapDays;
+        } else {
+          // No overlap, cost is 0 for this period
+          calculatedCost = 0;
+        }
+      } else if (row.first_activity_date && row.last_activity_date && calculatedCost > 0) {
+        // FALLBACK: Prorate base cost using campaign activity dates
+        const queryStartDate = new Date(startDate);
+        const queryEndDate = new Date(endDate);
+        const activityStartDate = new Date(row.first_activity_date);
+        const activityEndDate = new Date(row.last_activity_date);
+
+        // Calculate overlap between query range and activity period
+        const overlapStart = new Date(Math.max(queryStartDate.getTime(), activityStartDate.getTime()));
+        const overlapEnd = new Date(Math.min(queryEndDate.getTime(), activityEndDate.getTime()));
+
+        if (overlapStart <= overlapEnd) {
+          // Calculate total days in activity period
+          const activityDays = Math.ceil((activityEndDate.getTime() - activityStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          // Calculate overlap days
+          const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+          // Prorate the base cost
+          calculatedCost = (calculatedCost / activityDays) * overlapDays;
+        } else {
+          // No overlap with activity period
+          calculatedCost = 0;
+        }
+      }
 
       // Calculate derived metrics
       // Note: This is a simplified calculation. Adjust based on your actual business logic
@@ -246,7 +308,7 @@ export class PerformanceService {
         targeting: row.targeting || 'General',
         special: row.special || 'Standard',
         metrics: this.calculateMetrics({
-          cost,
+          cost: calculatedCost,
           revenue,
           sales,
           uniqueClicks: sessions, // Using sessions as proxy for unique clicks

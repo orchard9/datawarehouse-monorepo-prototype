@@ -22,7 +22,8 @@ const PerformanceQuerySchema = z.object({
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start_date must be in YYYY-MM-DD format').optional(),
   end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end_date must be in YYYY-MM-DD format').optional(),
   network: z.string().min(1).max(255).optional(),
-  domain: z.string().min(1).max(255).optional()
+  domain: z.string().min(1).max(255).optional(),
+  search: z.string().min(1).max(255).optional()
 }).refine(
   (data) => {
     if (data.start_date && data.end_date) {
@@ -47,6 +48,7 @@ const PerformanceQuerySchema = z.object({
  * - end_date: End date for data range (YYYY-MM-DD) [optional, default: today]
  * - network: Filter by specific network [optional]
  * - domain: Filter by specific domain [optional]
+ * - search: Search term to filter campaigns (searches names and hierarchy dimensions) [optional]
  *
  * Response Structure:
  * - For network mode: 5-level hierarchy (network → domain → placement → targeting → special)

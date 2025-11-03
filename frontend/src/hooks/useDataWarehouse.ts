@@ -192,10 +192,15 @@ export function useCampaignHierarchy(campaignId: number | null) {
   };
 }
 
-export function useCampaignActivity(campaignId: number | null, page = 1, limit = 20) {
+export function useCampaignActivity(
+  campaignId: number | null,
+  page = 1,
+  limit = 20,
+  excludeActivityTypes?: ('sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit')[]
+) {
   const { data, loading, error, execute } = useApiCall(
-    () => campaignId ? dataWarehouseApi.campaigns.getActivity(campaignId, page, limit) : Promise.resolve(null),
-    [campaignId, page, limit]
+    () => campaignId ? dataWarehouseApi.campaigns.getActivity(campaignId, page, limit, excludeActivityTypes) : Promise.resolve(null),
+    [campaignId, page, limit, excludeActivityTypes]
   );
 
   useEffect(() => {

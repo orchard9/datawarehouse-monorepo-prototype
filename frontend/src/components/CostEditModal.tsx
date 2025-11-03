@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Save, AlertCircle, Loader2, DollarSign, Trash2 } from 'lucide-react';
+import { X, Save, AlertCircle, Loader2, DollarSign, Trash2, Calendar } from 'lucide-react';
 
 interface CostEditModalProps {
   isOpen: boolean;
@@ -7,9 +7,14 @@ interface CostEditModalProps {
   campaignId: number;
   currentCost: number;
   currentCostStatus: 'estimated' | 'confirmed' | 'api_sourced';
+  firstActivityDate?: string;
+  lastActivityDate?: string;
   onSave: (data: {
     cost: number;
     cost_status: 'confirmed' | 'api_sourced';
+    start_date: string;
+    end_date: string;
+    billing_period: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
     override_reason?: string;
     overridden_by: string;
   }) => Promise<void>;
@@ -22,12 +27,34 @@ export const CostEditModal: React.FC<CostEditModalProps> = ({
   campaignId,
   currentCost,
   currentCostStatus,
+  firstActivityDate,
+  lastActivityDate,
   onSave,
   onDelete,
 }) => {
+  // Helper to get default start date
+  const getDefaultStartDate = () => {
+    if (firstActivityDate) return firstActivityDate;
+    // Default to start of current month
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  };
+
+  // Helper to get default end date
+  const getDefaultEndDate = () => {
+    if (lastActivityDate) return lastActivityDate;
+    // Default to end of current month
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  };
+
   const [formData, setFormData] = useState({
     cost: currentCost.toString(),
     cost_status: currentCostStatus === 'estimated' ? 'confirmed' : currentCostStatus as 'confirmed' | 'api_sourced',
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    billing_period: 'monthly' as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom',
     override_reason: '',
   });
 
@@ -37,12 +64,30 @@ export const CostEditModal: React.FC<CostEditModalProps> = ({
 
   const costInputRef = useRef<HTMLInputElement>(null);
 
+  // Calculate daily rate for display
+  const calculateDailyRate = useCallback(() => {
+    const cost = parseFloat(formData.cost);
+    if (isNaN(cost) || !formData.start_date || !formData.end_date) return 0;
+
+    const start = new Date(formData.start_date);
+    const end = new Date(formData.end_date);
+    const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1; // +1 to include end date
+
+    if (daysDiff <= 0) return 0;
+    return cost / daysDiff;
+  }, [formData.cost, formData.start_date, formData.end_date]);
+
+  const dailyRate = calculateDailyRate();
+
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
       setFormData({
         cost: currentCost.toString(),
         cost_status: currentCostStatus === 'estimated' ? 'confirmed' : currentCostStatus,
+        start_date: getDefaultStartDate(),
+        end_date: getDefaultEndDate(),
+        billing_period: 'monthly',
         override_reason: '',
       });
       setError(null);
@@ -90,6 +135,19 @@ export const CostEditModal: React.FC<CostEditModalProps> = ({
       return;
     }
 
+    if (!formData.start_date || !formData.end_date) {
+      setError('Please provide both start and end dates');
+      return;
+    }
+
+    const startDate = new Date(formData.start_date);
+    const endDate = new Date(formData.end_date);
+
+    if (endDate < startDate) {
+      setError('End date must be on or after start date');
+      return;
+    }
+
     // Check if there are actual changes
     const hasChanges = cost !== currentCost || formData.cost_status !== currentCostStatus;
 
@@ -105,6 +163,9 @@ export const CostEditModal: React.FC<CostEditModalProps> = ({
       await onSave({
         cost,
         cost_status: formData.cost_status,
+        start_date: formData.start_date,
+        end_date: formData.end_date,
+        billing_period: formData.billing_period,
         override_reason: formData.override_reason.trim() || undefined,
         overridden_by: 'user', // TODO: Get from auth context
       });
@@ -236,6 +297,81 @@ export const CostEditModal: React.FC<CostEditModalProps> = ({
               Select whether this cost is manually confirmed or from ad platform API
             </p>
           </div>
+
+          {/* Billing Period */}
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-900">
+              Billing Period *
+            </label>
+            <select
+              value={formData.billing_period}
+              onChange={(e) => setFormData(prev => ({ ...prev, billing_period: e.target.value as any }))}
+              className="w-full px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+              disabled={isSaving || isDeleting}
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="custom">Custom Range</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              How often you're billed for this cost
+            </p>
+          </div>
+
+          {/* Date Range */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-900">
+                Start Date *
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
+                <input
+                  type="date"
+                  value={formData.start_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, start_date: e.target.value }))}
+                  className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+                  disabled={isSaving || isDeleting}
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                When this cost period starts
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-900">
+                End Date *
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
+                <input
+                  type="date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
+                  className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 focus:ring-2 focus:ring-pink-500 focus:outline-none"
+                  disabled={isSaving || isDeleting}
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                When this cost period ends
+              </p>
+            </div>
+          </div>
+
+          {/* Daily Rate Display */}
+          {dailyRate > 0 && (
+            <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-900">Daily Rate:</span>
+                <span className="text-lg font-bold text-blue-900">${dailyRate.toFixed(2)}/day</span>
+              </div>
+              <p className="mt-1 text-xs text-blue-700">
+                Cost will be prorated when viewing different date ranges
+              </p>
+            </div>
+          )}
 
           {/* Override Reason */}
           <div>

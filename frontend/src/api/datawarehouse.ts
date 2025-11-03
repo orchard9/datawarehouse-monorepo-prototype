@@ -109,7 +109,17 @@ export const campaignApi = {
   /**
    * Get campaign activity log
    */
-  async getActivity(id: number, page = 1, limit = 20) {
+  async getActivity(
+    id: number,
+    page = 1,
+    limit = 20,
+    excludeActivityTypes?: ('sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit')[]
+  ) {
+    const params: Record<string, any> = { page, limit };
+    if (excludeActivityTypes && excludeActivityTypes.length > 0) {
+      params.excludeActivityTypes = excludeActivityTypes.join(',');
+    }
+
     return api.getPaginated<{
       id: number;
       campaign_id: number;
@@ -119,7 +129,7 @@ export const campaignApi = {
       created_at: string;
       user_id?: string;
       source: 'system' | 'web_ui' | 'api' | 'etl';
-    }>(`${BASE_PATH}/campaigns/${id}/activity`, { page, limit });
+    }>(`${BASE_PATH}/campaigns/${id}/activity`, params);
   },
 
   /**
@@ -270,6 +280,30 @@ export const campaignApi = {
     return api.delete<{
       success: boolean;
     }>(`${BASE_PATH}/campaigns/${id}/cost/override`, data);
+  },
+
+  /**
+   * Get campaign cost override history
+   */
+  async getCostHistory(id: number, limit = 10) {
+    return api.get<{
+      history: Array<{
+        id: number;
+        campaign_id: number;
+        cost: number;
+        start_date: string;
+        end_date: string;
+        billing_period: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+        cost_status: 'confirmed' | 'api_sourced';
+        override_reason?: string;
+        overridden_by: string;
+        overridden_at: string;
+        is_active: boolean;
+        created_at: string;
+        updated_at: string;
+      }>;
+      total: number;
+    }>(`${BASE_PATH}/campaigns/${id}/cost/history`, { limit });
   },
 };
 

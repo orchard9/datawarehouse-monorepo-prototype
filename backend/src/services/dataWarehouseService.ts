@@ -57,6 +57,11 @@ export class DataWarehouseCampaignService {
         endDate
       } = query;
 
+      // Default endDate to today if startDate is provided but endDate is not
+      // This ensures cost proration logic works even when only startDate is provided
+      const actualStartDate = startDate;
+      const actualEndDate = endDate || (startDate ? new Date().toISOString().split('T')[0] : undefined);
+
       ErrorUtils.validateRequest(limit <= 1000, 'Limit cannot exceed 1000');
       ErrorUtils.validateRequest(page >= 1, 'Page must be >= 1');
 
@@ -116,15 +121,15 @@ export class DataWarehouseCampaignService {
       let startUnixHour: number | undefined;
       let endUnixHour: number | undefined;
 
-      if (startDate || endDate) {
+      if (actualStartDate || actualEndDate) {
         conditions.push('EXISTS (SELECT 1 FROM hourly_data hd WHERE hd.campaign_id = c.id');
-        if (startDate) {
-          startUnixHour = Math.floor(new Date(startDate).getTime() / 1000 / 3600);
+        if (actualStartDate) {
+          startUnixHour = Math.floor(new Date(actualStartDate).getTime() / 1000 / 3600);
           conditions[conditions.length - 1] += ' AND hd.unix_hour >= ?';
           params.push(startUnixHour);
         }
-        if (endDate) {
-          endUnixHour = Math.floor(new Date(endDate).getTime() / 1000 / 3600);
+        if (actualEndDate) {
+          endUnixHour = Math.floor(new Date(actualEndDate).getTime() / 1000 / 3600);
           conditions[conditions.length - 1] += ' AND hd.unix_hour <= ?';
           params.push(endUnixHour);
         }
@@ -146,6 +151,20 @@ export class DataWarehouseCampaignService {
       if (endUnixHour !== undefined) {
         dateFilterConditions.push('(hd.unix_hour IS NULL OR hd.unix_hour <= ?)');
         dateFilterParams.push(endUnixHour);
+      }
+
+      // Prepare cost override date filter parameters (endDate, startDate for overlap check)
+      // Need 4 values for: (? IS NULL OR date(cco.start_date) <= date(?)) AND (? IS NULL OR date(cco.end_date) >= date(?))
+      const costOverrideDateParams: any[] = [];
+      if (actualStartDate || actualEndDate) {
+        costOverrideDateParams.push(
+          actualEndDate ?? null,
+          actualEndDate ?? null,
+          actualStartDate ?? null,
+          actualStartDate ?? null
+        );
+      } else {
+        costOverrideDateParams.push(null, null, null, null);
       }
 
       // Combine base WHERE clause with date filter conditions for the main query
@@ -184,15 +203,15 @@ export class DataWarehouseCampaignService {
         SELECT
           c.id, c.name, c.description, c.tracking_url, c.is_serving, c.serving_url, c.traffic_weight,
           c.deleted_at, c.created_at, c.updated_at, c.slug, c.path, c.status, c.sync_timestamp,
-          COALESCE(cco.cost, c.cost) as cost,
-          COALESCE(cco.cost_status, c.cost_status, 'estimated') as cost_status,
-          cco.override_reason as cost_override_reason,
-          cco.overridden_by as cost_overridden_by,
-          cco.overridden_at as cost_overridden_at,
-          cco.start_date as cost_start_date,
-          cco.end_date as cost_end_date,
-          cco.billing_period as cost_billing_period,
-          CASE WHEN cco.id IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
+          COALESCE(MAX(cco.cost), c.cost) as cost,
+          COALESCE(MAX(cco.cost_status), c.cost_status, 'estimated') as cost_status,
+          MAX(cco.override_reason) as cost_override_reason,
+          MAX(cco.overridden_by) as cost_overridden_by,
+          MAX(cco.overridden_at) as cost_overridden_at,
+          MAX(cco.start_date) as cost_start_date,
+          MAX(cco.end_date) as cost_end_date,
+          MAX(cco.billing_period) as cost_billing_period,
+          CASE WHEN MAX(cco.id) IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
           COALESCE(cho.network, ch.network) as network,
           COALESCE(cho.domain, ch.domain) as domain,
           COALESCE(cho.placement, ch.placement) as placement,
@@ -227,25 +246,28 @@ export class DataWarehouseCampaignService {
         FROM campaigns c
         LEFT JOIN campaign_hierarchy ch ON c.id = ch.campaign_id
         LEFT JOIN campaign_hierarchy_overrides cho ON c.id = cho.campaign_id AND cho.is_active = 1
-        LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id AND cco.is_active = 1
+        LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id
+          AND cco.is_active = 1
+          AND (? IS NULL OR date(cco.start_date) <= date(?))
+          AND (? IS NULL OR date(cco.end_date) >= date(?))
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         ${mainQueryWhereClause}
-        GROUP BY c.id, ch.id, cco.id
+        GROUP BY c.id, ch.id
         ${orderClause}
         LIMIT ? OFFSET ?
       `;
 
-      const campaigns = db.executeQuery<any>(sql, [...params, ...dateFilterParams, limit, offset]);
+      const campaigns = db.executeQuery<any>(sql, [...costOverrideDateParams, ...params, ...dateFilterParams, limit, offset]);
 
       // Transform to typed response with metrics calculation
       const campaignsWithMetrics: DataWarehouseCampaignWithMetrics[] = campaigns.map(row => {
         // Calculate prorated cost if date filtering is active
         let calculatedCost = row.cost || 0;
 
-        if (startDate && endDate && row.cost_start_date && row.cost_end_date) {
+        if (actualStartDate && actualEndDate && row.cost_start_date && row.cost_end_date) {
           // PRIORITY 1: Use explicit cost override dates if they exist
-          const queryStartDate = new Date(startDate);
-          const queryEndDate = new Date(endDate);
+          const queryStartDate = new Date(actualStartDate);
+          const queryEndDate = new Date(actualEndDate);
           const costStartDate = new Date(row.cost_start_date);
           const costEndDate = new Date(row.cost_end_date);
 
@@ -265,10 +287,10 @@ export class DataWarehouseCampaignService {
             // No overlap means zero cost for this date range
             calculatedCost = 0;
           }
-        } else if (startDate && endDate && calculatedCost > 0 && row.first_activity_date && row.last_activity_date) {
+        } else if (actualStartDate && actualEndDate && calculatedCost > 0 && row.first_activity_date && row.last_activity_date) {
           // FALLBACK: Prorate base costs using campaign activity dates
-          const queryStartDate = new Date(startDate);
-          const queryEndDate = new Date(endDate);
+          const queryStartDate = new Date(actualStartDate);
+          const queryEndDate = new Date(actualEndDate);
           const activityStartDate = new Date(row.first_activity_date);
           const activityEndDate = new Date(row.last_activity_date);
 
@@ -414,15 +436,15 @@ export class DataWarehouseCampaignService {
         SELECT
           c.id, c.name, c.description, c.tracking_url, c.is_serving, c.serving_url, c.traffic_weight,
           c.deleted_at, c.created_at, c.updated_at, c.slug, c.path, c.status, c.sync_timestamp,
-          COALESCE(cco.cost, c.cost) as cost,
-          COALESCE(cco.cost_status, c.cost_status, 'estimated') as cost_status,
-          cco.override_reason as cost_override_reason,
-          cco.overridden_by as cost_overridden_by,
-          cco.overridden_at as cost_overridden_at,
-          cco.start_date as cost_start_date,
-          cco.end_date as cost_end_date,
-          cco.billing_period as cost_billing_period,
-          CASE WHEN cco.id IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
+          COALESCE(MAX(cco.cost), c.cost) as cost,
+          COALESCE(MAX(cco.cost_status), c.cost_status, 'estimated') as cost_status,
+          MAX(cco.override_reason) as cost_override_reason,
+          MAX(cco.overridden_by) as cost_overridden_by,
+          MAX(cco.overridden_at) as cost_overridden_at,
+          MAX(cco.start_date) as cost_start_date,
+          MAX(cco.end_date) as cost_end_date,
+          MAX(cco.billing_period) as cost_billing_period,
+          CASE WHEN MAX(cco.id) IS NOT NULL THEN 1 ELSE 0 END as has_cost_override,
           ch.id as hierarchy_id,
           COALESCE(cho.network, ch.network) as network,
           COALESCE(cho.domain, ch.domain) as domain,
@@ -464,7 +486,7 @@ export class DataWarehouseCampaignService {
         LEFT JOIN campaign_cost_overrides cco ON c.id = cco.campaign_id AND cco.is_active = 1
         LEFT JOIN hourly_data hd ON c.id = hd.campaign_id
         WHERE c.id = ?
-        GROUP BY c.id, ch.id, cco.id
+        GROUP BY c.id, ch.id
       `;
 
       const dbResult = db.executeQuerySingle<any>(sql, [id]);
@@ -959,6 +981,9 @@ conn.close()
           id,
           campaign_id,
           cost,
+          start_date,
+          end_date,
+          billing_period,
           cost_status,
           override_reason,
           overridden_by,
@@ -983,6 +1008,9 @@ conn.close()
         id: row.id,
         campaign_id: row.campaign_id,
         cost: row.cost,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        billing_period: row.billing_period,
         cost_status: row.cost_status,
         override_reason: row.override_reason,
         overridden_by: row.overridden_by,
@@ -1578,13 +1606,24 @@ conn.close()
 
       const {
         page = 1,
-        limit = 50
+        limit = 50,
+        excludeActivityTypes
       } = query;
 
       ErrorUtils.validateRequest(limit <= 1000, 'Limit cannot exceed 1000');
       ErrorUtils.validateRequest(page >= 1, 'Page must be >= 1');
 
       const offset = (page - 1) * limit;
+
+      // Build WHERE clause for activity type exclusion
+      const params: any[] = [campaignId];
+      let whereClause = 'WHERE campaign_id = ?';
+
+      if (excludeActivityTypes && excludeActivityTypes.length > 0) {
+        const placeholders = excludeActivityTypes.map(() => '?').join(', ');
+        whereClause += ` AND activity_type NOT IN (${placeholders})`;
+        params.push(...excludeActivityTypes);
+      }
 
       // Query campaign-specific activity from campaign_activity table
       const activitySql = `
@@ -1598,22 +1637,22 @@ conn.close()
           user_id,
           source
         FROM campaign_activity
-        WHERE campaign_id = ?
+        ${whereClause}
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
       `;
 
-      // Get total count for this campaign
+      // Get total count for this campaign (with same filters)
       const countSql = `
         SELECT COUNT(*) as count
         FROM campaign_activity
-        WHERE campaign_id = ?
+        ${whereClause}
       `;
-      const countResult = db.executeQuerySingle<{ count: number }>(countSql, [campaignId]);
+      const countResult = db.executeQuerySingle<{ count: number }>(countSql, params);
       const total = countResult?.count || 0;
 
       // Get activities
-      const activities = db.executeQuery<any>(activitySql, [campaignId, limit, offset]);
+      const activities = db.executeQuery<any>(activitySql, [...params, limit, offset]);
 
       // Transform to match CampaignActivity interface
       const transformedActivities: CampaignActivity[] = activities.map(row => ({

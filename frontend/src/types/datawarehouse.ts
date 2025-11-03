@@ -61,8 +61,11 @@ export interface Campaign {
   slug: string;
   path: string | null;
   cost: number;
+  cost_status?: 'estimated' | 'confirmed' | 'api_sourced';
   status: 'live' | 'paused' | 'unknown';
   sync_timestamp: string;
+  first_activity_date?: string | null;
+  last_activity_date?: string | null;
   metrics?: CampaignMetrics;
   hierarchy?: CampaignHierarchy;
 }
@@ -302,6 +305,23 @@ export interface DataWarehouseState {
 
   // Dashboard State
   dashboardFilters: DashboardFilters;
+}
+
+// Cost Override Types
+export interface CostOverride {
+  id: number;
+  campaign_id: number;
+  cost: number;
+  start_date: string;
+  end_date: string;
+  billing_period: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+  cost_status: 'confirmed' | 'api_sourced';
+  override_reason?: string;
+  overridden_by: string;
+  overridden_at: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // Utility Types

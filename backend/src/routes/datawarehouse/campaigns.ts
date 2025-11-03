@@ -50,6 +50,10 @@ const ActivityQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   activityType: z.enum(['created', 'updated', 'paused', 'resumed', 'deleted', 'sync', 'data_received', 'hierarchy_mapped']).optional(),
+  excludeActivityTypes: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    return val.split(',').map(t => t.trim()) as ('sync' | 'hierarchy_update' | 'status_change' | 'cost_update' | 'cost_delete' | 'data_received' | 'manual_edit')[];
+  }),
   source: z.enum(['system', 'user', 'api', 'etl']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional()
